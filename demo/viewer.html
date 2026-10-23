@@ -96,7 +96,7 @@
     <div id="cams"></div>
     <div class="sechead"><h2>Recent activity</h2><button id="delAll" class="grey small">Delete all photos</button></div>
     <div id="grid" class="grid"></div>
-    <div class="hint" style="margin-top:24px">Version 20261023l</div>
+    <div class="hint" style="margin-top:24px">Version 20261023m</div>
   </main>
 </div>
 
@@ -107,9 +107,9 @@
   </div>
 </div>
 
-<script src="config.js?v=20261023l"></script>
-<script src="sb.js?v=20261023l"></script>
-<script src="auth.js?v=20261023l"></script>
+<script src="config.js?v=20261023m"></script>
+<script src="sb.js?v=20261023m"></script>
+<script src="auth.js?v=20261023m"></script>
 <script>
 (function () {
   var sb = makeSb('garage_viewer_session');
@@ -530,7 +530,8 @@
     body.appendChild(lw);
 
     var tw = h('div', 'setting');
-    tw.appendChild(h('label', '', 'Extra alerts through the ntfy app (optional; ntfy limits free messages per day)'));
+    tw.appendChild(h('label', '', 'Phone alerts through the ntfy app. The topic works like a password: keep it secret.'));
+    tw.appendChild(h('div', 'hint', 'Install the free ntfy app, tap +, and subscribe to exactly this topic. Samsung and other phones show it as a normal popup.'));
     var topic = document.createElement('input');
     topic.type = 'text'; topic.value = c.ntfy_topic || ''; topic.placeholder = 'e.g. garage-k3x9q2';
     topic.onchange = function () {
@@ -540,8 +541,11 @@
     tw.appendChild(topic);
     var gen = h('button', 'grey', 'Generate random topic');
     gen.onclick = function () {
+      // Long random topic (24 characters from a secure random source), as ntfy topics act as passwords.
       var chars = 'abcdefghijkmnpqrstuvwxyz23456789', s = 'garage-';
-      for (var i = 0; i < 10; i++) { s += chars.charAt(Math.floor(Math.random() * chars.length)); }
+      var rnd = new Uint8Array(24);
+      (window.crypto || window.msCrypto).getRandomValues(rnd);
+      for (var i = 0; i < rnd.length; i++) { s += chars.charAt(rnd[i] % chars.length); }
       topic.value = s;
       topic.onchange();
     };
@@ -664,7 +668,13 @@
       lines.push('Notifications: the server could not send them.');
     }
     if (res.ntfy) {
-      lines.push(res.ntfy.error ? 'ntfy: ' + res.ntfy.error : 'ntfy (topic ' + res.ntfy.topic + '): answered ' + res.ntfy.status + (res.ntfy.status >= 200 && res.ntfy.status < 300 ? '' : ' - refused, probably its daily limit.'));
+      if (res.ntfy.error) {
+        lines.push('ntfy: ' + res.ntfy.error);
+      } else if (res.ntfy.status >= 200 && res.ntfy.status < 300) {
+        lines.push('ntfy: delivered to topic "' + res.ntfy.topic + '". It must be the exact topic subscribed in the ntfy app.');
+      } else {
+        lines.push('ntfy refused it (HTTP ' + res.ntfy.status + '): ' + (res.ntfy.detail || 'no details'));
+      }
     }
     if (res.error) { lines.push(res.error); }
     return lines.join(' ');
