@@ -7,13 +7,18 @@ self.addEventListener('push', function (e) {
   try { d = e.data.json(); } catch (err) { d = { title: 'Garage camera', body: e.data ? e.data.text() : '' }; }
   e.waitUntil(self.registration.showNotification(d.title || 'Garage camera', {
     body: d.body || '',
+    icon: 'icon-192.png',
+    badge: 'badge-96.png',                 // transparent PNG: Android only uses its alpha channel
     tag: d.tag || 'garage',
     renotify: true,
+    requireInteraction: true,              // stays in the shade until tapped or swiped away
     silent: false,
     vibrate: [200, 100, 200],
     data: { url: d.url || './viewer.html' }
   }));
 });
+
+self.addEventListener('fetch', function () {});
 
 self.addEventListener('notificationclick', function (e) {
   e.notification.close();
