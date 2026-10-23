@@ -43,6 +43,7 @@
       <button id="forget" class="off">Forget camera code</button>
     </div>
     <div class="hint" id="status"></div>
+    <div class="hint" id="diag"></div>
     <div class="hint" id="build"></div>
     <div class="hint">Settings (sensitivity, pause, arming, alerts) are set in the viewer. Keep this page open and the phone plugged in.</div>
   </section>
@@ -52,10 +53,10 @@
   <canvas id="liveC" style="display:none"></canvas>
 </main>
 
-<script src="config.js?v=20261023g"></script>
+<script src="config.js?v=20261023h"></script>
 <script>
 (function () {
-  var BUILD = '20261023g';      // keep equal to version.json; the page reloads itself when they differ
+  var BUILD = '20261023h';      // keep equal to version.json; the page reloads itself when they differ
   var cfg = window.GARAGE_CONFIG;
   var CODE_KEY = 'garage_camera_code';
   var SETTINGS_KEY = 'garage_camera_settings';
@@ -64,6 +65,7 @@
   var video = document.getElementById('video');
   var badge = document.getElementById('badge');
   var statusEl = document.getElementById('status');
+  var diagEl = document.getElementById('diag');
   var work = document.getElementById('work');
   var wctx = work.getContext('2d');
   var full = document.getElementById('full');
@@ -80,6 +82,13 @@
   var lastAlert = 0;
   var hits = 0;                // consecutive checks over the threshold (filters single-frame noise)
   var noise = 0;               // learned background noise (% of pixels), so noise alone never triggers
+  var haveLast = false;        // cur holds a previous frame
+  var lastMoveAt = 0;          // last time something moved between two frames
+  var staticChange = false;    // the picture differs from the reference but nothing moves
+  var lastDiag = 0;
+  var MOVE_DIFF = 14;          // brightness change between two frames that counts as movement
+  var MOVE_MIN = 0.04;         // % of pixels moving between two frames that counts as movement
+  var STATIC_ABSORB_S = 5;     // seconds for the reference to absorb a static change
   var lastPct = 0;             // motion level of the latest check
   var lastEpisode = 0;         // when the last motion episode started
   var bootAt = Date.now();
@@ -166,28 +175,43 @@
     var now = Date.now();
     var dt = (now - lastTick) / 1000;
     lastTick = now;
-    // How fast the reference absorbs the current scene (exponential average over adapt_s seconds)
-    var alpha = 1 - Math.exp(-dt / Number(settings.adapt_s));
+    // How fast the reference absorbs the current scene (exponential average over adapt_s seconds).
+    // A change that stays put without anything moving (a moved object, someone who left) is absorbed fast.
+    var tauBg = staticChange ? STATIC_ABSORB_S : Number(settings.adapt_s);
+    var alpha = 1 - Math.exp(-dt / tauBg);
     var changed = 0;
+    var moved = 0;
     for (var i = 0, p = 0; i < data.length; i += 4, p++) {
       var g = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
       if (bg) {
         if (Math.abs(g - bg[p]) > PIXEL_DIFF) { changed++; }
         bg[p] += (g - bg[p]) * alpha;
       }
+      if (haveLast && Math.abs(g - cur[p]) > MOVE_DIFF) { moved++; }   // cur still holds the previous frame here
       cur[p] = g;
     }
+    haveLast = true;
     if (!bg) { bg = new Float32Array(cur); }
     var pct = changed * 100 / TOTAL;
     if (pct > maxLevel) { maxLevel = pct; }
     lastPct = pct;
-    // Learn the background noise: fast during the first minute, slowly afterwards.
-    var tau = (now - bootAt) < 60000 ? 10 : 60;
-    noise += (pct - noise) * Math.min(1, dt / tau);
-    if (!settings.armed) { hits = 0; return; }
+    // Frame-to-frame movement: static differences from the reference (an empty room after someone left) must not trigger.
+    if (moved * 100 / TOTAL >= MOVE_MIN) { lastMoveAt = now; }
+    var moving = (now - lastMoveAt) < 1500;
     // The trigger level is the viewer's sensitivity, but never below three times the learned noise.
     var thr = Math.max(sensPct(), noise * 3);
-    hits = pct >= thr ? hits + 1 : 0;
+    // Learn the noise only from quiet frames, so motion itself never raises the trigger level.
+    if (pct < thr) {
+      var tau = (now - bootAt) < 60000 ? 10 : 60;
+      noise += (pct - noise) * Math.min(1, dt / tau);
+    }
+    staticChange = pct >= thr && (now - lastMoveAt) > 3000;
+    if (now - lastDiag > 1000) {
+      lastDiag = now;
+      diagEl.textContent = 'change ' + pct.toFixed(2) + '% | trigger ' + thr.toFixed(2) + '% | noise ' + noise.toFixed(2) + '%' + (moving ? ' | moving' : '');
+    }
+    if (!settings.armed) { hits = 0; return; }
+    hits = pct >= thr && moving ? hits + 1 : 0;
     // Strong motion triggers at once; weaker motion must be seen twice in a row.
     var strong = pct >= thr * 2;
     var gap = Math.min(Number(settings.cooldown_s), 5) * 1000;      // short gap between episodes
