@@ -15,6 +15,7 @@
   button:disabled { opacity: .6; cursor: default; }
   input[type=email], input[type=password], input[type=text] { width: 100%; padding: 11px; font-size: 16px; margin-bottom: 8px; border-radius: 8px; border: 1px solid var(--line); background: #111318; color: var(--text); }
   input[type=range] { width: 100%; }
+  select { width: 100%; padding: 11px; font-size: 16px; border-radius: 8px; border: 1px solid var(--line); background: #111318; color: var(--text); }
   .hint { font-size: 12px; color: var(--mute); margin: 6px 0; }
   .err { color: var(--red); font-size: 14px; min-height: 18px; }
 
@@ -91,7 +92,7 @@
     <div id="cams"></div>
     <h2>Recent activity</h2>
     <div id="grid" class="grid"></div>
-    <div class="hint" style="margin-top:24px">Version 20261023d</div>
+    <div class="hint" style="margin-top:24px">Version 20261023e</div>
   </main>
 </div>
 
@@ -102,9 +103,9 @@
   </div>
 </div>
 
-<script src="config.js?v=20261023d"></script>
-<script src="sb.js?v=20261023d"></script>
-<script src="auth.js?v=20261023d"></script>
+<script src="config.js?v=20261023e"></script>
+<script src="sb.js?v=20261023e"></script>
+<script src="auth.js?v=20261023e"></script>
 <script>
 (function () {
   var sb = makeSb('garage_viewer_session');
@@ -476,6 +477,20 @@
     var arm = h('button');
     arm.onclick = function () { save(id, { armed: !camById[id].armed }); update(camById[id]); };
     body.appendChild(arm);
+
+    var lens = h('div', 'setting');
+    lens.appendChild(h('label', '', 'Lens'));
+    var sel = document.createElement('select');
+    [['environment', 'Back camera'], ['user', 'Front (selfie) camera']].forEach(function (o) {
+      var op = document.createElement('option');
+      op.value = o[0]; op.textContent = o[1];
+      sel.appendChild(op);
+    });
+    sel.value = c.facing || 'environment';
+    sel.onchange = function () { save(id, { facing: sel.value }); };
+    lens.appendChild(sel);
+    lens.appendChild(h('div', 'hint', 'The camera switches lens within a few seconds. Live video reconnects after the switch.'));
+    body.appendChild(lens);
 
     slider(body, 'Sensitivity', 1, 100, c.sensitivity,
       function (v) { return 'alert at ' + (v / 20).toFixed(2) + '% of the image changing (lower = more sensitive)'; },

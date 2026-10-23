@@ -52,10 +52,10 @@
   <canvas id="liveC" style="display:none"></canvas>
 </main>
 
-<script src="config.js?v=20261023d"></script>
+<script src="config.js?v=20261023e"></script>
 <script>
 (function () {
-  var BUILD = '20261023d';      // keep equal to version.json; the page reloads itself when they differ
+  var BUILD = '20261023e';      // keep equal to version.json; the page reloads itself when they differ
   var cfg = window.GARAGE_CONFIG;
   var CODE_KEY = 'garage_camera_code';
   var SETTINGS_KEY = 'garage_camera_settings';
@@ -69,7 +69,10 @@
   var full = document.getElementById('full');
 
   // Defaults until the first sync; the last known settings are kept so a restart without internet still works.
-  var settings = { sensitivity: 6, cooldown_s: 30, adapt_s: 60, armed: false };
+  var settings = { sensitivity: 6, cooldown_s: 30, adapt_s: 60, armed: false, facing: 'environment' };
+  var currentFacing = null;    // lens in use right now
+  var switching = false;
+  var failedFacing = null;     // a lens that could not be opened, so we do not retry it every sync
   var bg = null;               // reference image of the garage, adapts slowly
   var cur = new Uint8Array(work.width * work.height);
   var TOTAL = work.width * work.height;
@@ -100,8 +103,8 @@
     setBadge(settings.armed ? 'Armed' : 'Disarmed', settings.armed ? 'armed' : '');
   }
 
-  function getStream() {
-    var constraints = { video: { facingMode: 'environment', width: { ideal: 1280 } }, audio: false };
+  function getStream(facing) {
+    var constraints = { video: { facingMode: facing || settings.facing || 'environment', width: { ideal: 1280 } }, audio: false };
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       return navigator.mediaDevices.getUserMedia(constraints);
     }
@@ -115,6 +118,7 @@
     getStream().then(function (stream) {
       video.srcObject = stream;
       video.play();
+      currentFacing = settings.facing || 'environment';
       started = true;
       el('start').className = 'hidden';
       showArmState();
@@ -125,6 +129,28 @@
       setBadge('Camera blocked');
       statusEl.textContent = 'Camera error: ' + err.message + '. Tap Start camera and allow access.';
     });
+  }
+
+  // Switch between the back and the front (selfie) camera when the viewer asks for it.
+  function switchCamera(facing) {
+    if (switching) { return; }
+    switching = true;
+    closeRtc();                                  // a running live video must reconnect after the switch
+    var old = video.srcObject;
+    if (old) { old.getTracks().forEach(function (t) { t.stop(); }); }
+    getStream(facing).then(function (stream) {
+      video.srcObject = stream;
+      video.play();
+      currentFacing = facing;
+      failedFacing = null;
+      bg = null;
+      hits = 0;
+      statusEl.textContent = 'Switched to the ' + (facing === 'user' ? 'front' : 'back') + ' camera';
+    }).catch(function (err) {
+      failedFacing = facing;
+      statusEl.textContent = 'Could not open the ' + (facing === 'user' ? 'front' : 'back') + ' camera: ' + err.message;
+      return getStream(currentFacing).then(function (stream) { video.srcObject = stream; video.play(); });
+    }).catch(function () {}).then(function () { switching = false; });
   }
 
   function tick() {
@@ -210,7 +236,8 @@
       }).then(function (s) {
         if (!s) { return; }
         if (s.armed !== settings.armed) { bg = null; hits = 0; }
-        settings = { sensitivity: s.sensitivity, cooldown_s: s.cooldown_s, adapt_s: s.adapt_s, armed: s.armed };
+        settings = { sensitivity: s.sensitivity, cooldown_s: s.cooldown_s, adapt_s: s.adapt_s, armed: s.armed, facing: s.facing || 'environment' };
+        if (started && settings.facing !== currentFacing && settings.facing !== failedFacing) { switchCamera(settings.facing); }
         store(SETTINGS_KEY, JSON.stringify(settings));
         showArmState();
         statusEl.textContent = 'Online, synced ' + new Date().toLocaleTimeString();
