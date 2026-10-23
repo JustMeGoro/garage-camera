@@ -52,10 +52,10 @@
   <canvas id="liveC" style="display:none"></canvas>
 </main>
 
-<script src="config.js?v=20261023f"></script>
+<script src="config.js?v=20261023g"></script>
 <script>
 (function () {
-  var BUILD = '20261023f';      // keep equal to version.json; the page reloads itself when they differ
+  var BUILD = '20261023g';      // keep equal to version.json; the page reloads itself when they differ
   var cfg = window.GARAGE_CONFIG;
   var CODE_KEY = 'garage_camera_code';
   var SETTINGS_KEY = 'garage_camera_settings';
@@ -79,6 +79,12 @@
   var lastTick = Date.now();
   var lastAlert = 0;
   var hits = 0;                // consecutive checks over the threshold (filters single-frame noise)
+  var noise = 0;               // learned background noise (% of pixels), so noise alone never triggers
+  var lastPct = 0;             // motion level of the latest check
+  var lastEpisode = 0;         // when the last motion episode started
+  var bootAt = Date.now();
+  var queue = [];              // photos waiting to be uploaded
+  var sending = false;
   var maxLevel = 0;            // highest motion level since the last sync (shown live in the viewer)
   var uploading = false;
   var started = false;
@@ -174,17 +180,58 @@
     if (!bg) { bg = new Float32Array(cur); }
     var pct = changed * 100 / TOTAL;
     if (pct > maxLevel) { maxLevel = pct; }
+    lastPct = pct;
+    // Learn the background noise: fast during the first minute, slowly afterwards.
+    var tau = (now - bootAt) < 60000 ? 10 : 60;
+    noise += (pct - noise) * Math.min(1, dt / tau);
     if (!settings.armed) { hits = 0; return; }
-    hits = pct >= sensPct() ? hits + 1 : 0;
-    // Strong motion triggers at once; weaker motion must be seen twice in a row (filters noise).
-    var strong = pct >= sensPct() * 2;
-    if ((hits >= 2 || (strong && hits >= 1)) && now - lastAlert > Number(settings.cooldown_s) * 1000) {
+    // The trigger level is the viewer's sensitivity, but never below three times the learned noise.
+    var thr = Math.max(sensPct(), noise * 3);
+    hits = pct >= thr ? hits + 1 : 0;
+    // Strong motion triggers at once; weaker motion must be seen twice in a row.
+    var strong = pct >= thr * 2;
+    var gap = Math.min(Number(settings.cooldown_s), 5) * 1000;      // short gap between episodes
+    if ((hits >= 2 || (strong && hits >= 1)) && now - lastEpisode > gap) {
       hits = 0;
-      lastAlert = now;
+      lastEpisode = now;
       setBadge('MOTION', 'motion');
       setTimeout(showArmState, 3000);
-      capture(function (blob) { sendPhoto(blob, 'motion', pct); });
+      burst();
     }
+  }
+
+  // Take the photos right now (at 0, 0.5 and 1.2 s) and upload them afterwards from the queue.
+  function burst() {
+    [0, 500, 1200].forEach(function (ms) {
+      setTimeout(function () {
+        if (!video.videoWidth) { return; }
+        var pctNow = lastPct;
+        capture(function (blob) { queuePhoto(blob, pctNow); });
+      }, ms);
+    });
+  }
+
+  function queuePhoto(blob, pct) {
+    queue.push({ blob: blob, pct: pct });
+    if (queue.length > 20) { queue.shift(); }
+    pump();
+  }
+
+  function pump() {
+    if (sending || !queue.length) { return; }
+    sending = true;
+    var item = queue[0];
+    var query = '?kind=motion&pct=' + (Math.round(item.pct * 100) / 100);
+    fn(query, { headers: { 'Content-Type': 'image/jpeg' }, body: item.blob }).then(function (r) {
+      if (r.status === 401) { queue = []; codeRejected(); return null; }
+      if (!r.ok) { throw new Error('HTTP ' + r.status); }
+      queue.shift();
+      statusEl.textContent = 'Photo uploaded ' + new Date().toLocaleTimeString() + (queue.length ? ' (' + queue.length + ' waiting)' : '');
+      return null;
+    }).catch(function (e) {
+      statusEl.textContent = 'Upload failed, will retry: ' + e.message;
+      return new Promise(function (resolve) { setTimeout(resolve, 5000); });
+    }).then(function () { sending = false; pump(); });
   }
 
   // Photos are scaled down (max 960 px wide) to keep the upload small on a weak connection.
