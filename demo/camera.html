@@ -51,7 +51,7 @@
   <canvas id="liveC" style="display:none"></canvas>
 </main>
 
-<script src="config.js?v=20261023b"></script>
+<script src="config.js?v=20261023c"></script>
 <script>
 (function () {
   var cfg = window.GARAGE_CONFIG;
@@ -216,12 +216,73 @@
           capture(function (blob) { sendPhoto(blob, 'snapshot', null); });
         }
         if (s.live && !liveOn) { liveOn = true; liveLoop(); }
+        handleOffer(s.rtc_offer);
       }).catch(function (e) {
         statusEl.textContent = 'Offline (' + e.message + '), using last settings';
       });
   }
 
-  // Near-live view: while a viewer watches, send a small frame about once a second.
+  // Live video: the viewer posts a WebRTC offer, we answer with our camera stream (direct link, no relay).
+  var rtc = { pc: null, id: null };
+
+  function closeRtc() {
+    if (rtc.pc) { try { rtc.pc.close(); } catch (e) {} }
+    rtc.pc = null;
+    rtc.id = null;
+  }
+
+  function waitIce(pc) {
+    return new Promise(function (resolve) {
+      if (pc.iceGatheringState === 'complete') { resolve(); return; }
+      var done = false;
+      function fin() { if (!done) { done = true; resolve(); } }
+      pc.onicegatheringstatechange = function () { if (pc.iceGatheringState === 'complete') { fin(); } };
+      setTimeout(fin, 3500);
+    });
+  }
+
+  function handleOffer(raw) {
+    if (!raw) { if (rtc.pc) { closeRtc(); statusEl.textContent = 'Live video stopped'; } return; }
+    var offer;
+    try { offer = JSON.parse(raw); } catch (e) { return; }
+    if (!offer || !offer.id || offer.id === rtc.id) { return; }
+    closeRtc();
+    if (!window.RTCPeerConnection || !video.srcObject) { return; }
+    rtc.id = offer.id;
+    var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    rtc.pc = pc;
+    var stream = video.srcObject;
+    if (pc.addTrack) {
+      stream.getTracks().forEach(function (t) { pc.addTrack(t, stream); });
+    } else {
+      pc.addStream(stream);
+    }
+    var dropTimer = null;
+    pc.oniceconnectionstatechange = function () {
+      var st = pc.iceConnectionState;
+      if (st === 'connected' || st === 'completed') { clearTimeout(dropTimer); statusEl.textContent = 'Live video connected'; }
+      if (st === 'failed' || st === 'closed') { if (rtc.pc === pc) { closeRtc(); } }
+      if (st === 'disconnected') {
+        clearTimeout(dropTimer);
+        dropTimer = setTimeout(function () { if (rtc.pc === pc && pc.iceConnectionState !== 'connected') { closeRtc(); } }, 10000);
+      }
+    };
+    pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: offer.sdp }))
+      .then(function () { return pc.createAnswer(); })
+      .then(function (a) { return pc.setLocalDescription(a); })
+      .then(function () { return waitIce(pc); })
+      .then(function () {
+        return fn('?action=answer', {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: offer.id, sdp: pc.localDescription.sdp })
+        });
+      }).catch(function (e) {
+        statusEl.textContent = 'Live video failed: ' + e.message;
+        if (rtc.pc === pc) { closeRtc(); }
+      });
+  }
+
+  // Fallback live view: while a viewer watches, send a small frame about once a second.
   // The server tells us when to stop (the viewer closed the live view).
   var liveOn = false;
 
@@ -239,7 +300,7 @@
         return r.json();
       }).then(function (j) {
         if (!j || !j.live) { liveOn = false; return; }
-        setTimeout(liveLoop, 700);
+        setTimeout(liveLoop, 150);
       }).catch(function () { setTimeout(liveLoop, 3000); });
     }
 

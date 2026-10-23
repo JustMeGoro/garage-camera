@@ -118,6 +118,11 @@ window.makeSb = function (storeKey) {
         body: JSON.stringify(patch)
       });
     },
+    getRtcAnswer: function (id) {
+      return api('/rest/v1/cameras?id=eq.' + id + '&select=rtc_answer')
+        .then(function (r) { return r.json(); })
+        .then(function (rows) { return rows.length ? rows[0].rtc_answer : null; });
+    },
     deleteObject: function (path) {
       return api('/storage/v1/object/garage-photos/' + path, { method: 'DELETE' });
     },

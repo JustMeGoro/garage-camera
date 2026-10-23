@@ -32,7 +32,7 @@
   .err.top { margin-bottom: 8px; }
 
   .hero { position: relative; background: #000; border-radius: 14px; overflow: hidden; aspect-ratio: 4 / 3; margin-bottom: 16px; border: 1px solid var(--line); }
-  .hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .hero img, .hero video { width: 100%; height: 100%; object-fit: cover; display: block; background: #000; }
   .hero .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--mute); font-size: 14px; text-align: center; padding: 20px; }
   .pill { position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,.6); padding: 5px 11px; border-radius: 999px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
   .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--mute); }
@@ -101,9 +101,9 @@
   </div>
 </div>
 
-<script src="config.js?v=20261023b"></script>
-<script src="sb.js?v=20261023b"></script>
-<script src="auth.js?v=20261023b"></script>
+<script src="config.js?v=20261023c"></script>
+<script src="sb.js?v=20261023c"></script>
+<script src="auth.js?v=20261023c"></script>
 <script>
 (function () {
   var sb = makeSb('garage_viewer_session');
@@ -117,8 +117,8 @@
   var lives = {};            // camera id -> running live view
   var prevSnap = {};
   var modalState = null;     // { update(cam) } while a camera settings modal is open
-  var LIVE_MAX_MS = 5 * 60 * 1000;
-  var LIVE_FRAME_MS = 800;
+  var LIVE_MAX_MS = 10 * 60 * 1000;
+  var LIVE_FRAME_MS = 150;
   var ONLINE_MS = 30000;
 
   // ---------- small helpers ----------
@@ -174,6 +174,7 @@
 
   function buildCard(c) {
     var hero = h('div', 'hero');
+    var vid = h('video', 'hidden'); vid.autoplay = true; vid.muted = true; vid.setAttribute('playsinline', '');
     var img = h('img'); img.alt = ''; img.className = 'hidden';
     var empty = h('div', 'empty', 'No photo yet');
     var pill = h('div', 'pill');
@@ -187,9 +188,9 @@
     info.appendChild(name); info.appendChild(sub);
     var liveBtn = h('button', '', 'Live');
     foot.appendChild(info); foot.appendChild(liveBtn);
-    hero.appendChild(img); hero.appendChild(empty); hero.appendChild(pill); hero.appendChild(gear); hero.appendChild(foot);
+    hero.appendChild(vid); hero.appendChild(img); hero.appendChild(empty); hero.appendChild(pill); hero.appendChild(gear); hero.appendChild(foot);
 
-    var p = { root: hero, img: img, empty: empty, pill: pill, name: name, sub: sub, liveBtn: liveBtn, shownPath: null };
+    var p = { root: hero, vid: vid, img: img, empty: empty, pill: pill, name: name, sub: sub, liveBtn: liveBtn, shownPath: null };
     cards[c.id] = p;
     gear.onclick = function () { openSettings(c.id); };
     liveBtn.onclick = function () { if (lives[c.id]) { stopLive(c.id); } else { startLive(c.id); } };
@@ -301,30 +302,132 @@
     }).catch(showErr);
   }
 
-  // ---------- near-live view: the camera sends a small frame about once a second while this runs ----------
+  // ---------- live view ----------
+  // First choice: real video (WebRTC, direct link camera <-> this page, signalling through the cameras table).
+  // Fallback: the camera sends a small picture every moment while this runs.
+  var ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+  var RTC_WAIT_MS = 20000;
+
+  function waitIce(pc) {
+    return new Promise(function (resolve) {
+      if (pc.iceGatheringState === 'complete') { resolve(); return; }
+      var done = false;
+      function fin() { if (!done) { done = true; resolve(); } }
+      pc.onicegatheringstatechange = function () { if (pc.iceGatheringState === 'complete') { fin(); } };
+      setTimeout(fin, 3500);
+    });
+  }
+
   function stopLive(id, msg) {
     var l = lives[id];
     if (!l) { return; }
     clearInterval(l.keep);
+    clearInterval(l.poll);
     clearTimeout(l.timer);
+    clearTimeout(l.fallbackTimer);
+    clearTimeout(l.maxTimer);
+    if (l.pc) { try { l.pc.close(); } catch (e) {} }
     delete lives[id];
     var p = cards[id];
-    if (p) { p.img.onload = null; p.img.onerror = null; p.shownPath = '__reset__'; }
-    save(id, { live_until: null });
+    if (p) {
+      p.vid.srcObject = null;
+      p.vid.className = 'hidden';
+      p.img.onload = null; p.img.onerror = null;
+      p.shownPath = '__reset__';
+    }
+    save(id, { live_until: null, rtc_offer: null });
     if (camById[id]) { updateCard(camById[id]); }
     if (msg) { $('err').textContent = msg; }
   }
 
+  function showWaiting(p, text) {
+    p.img.className = 'hidden';
+    p.vid.className = 'hidden';
+    p.empty.textContent = text;
+    p.empty.className = 'empty';
+  }
+
   function startLive(id) {
     var p = cards[id];
-    var path = 'live/' + id + '.jpg';
-    var l = { url: null, timer: null, keep: null, stopAt: Date.now() + LIVE_MAX_MS };
+    var l = { pc: null, keep: null, poll: null, timer: null, fallbackTimer: null, maxTimer: null, url: null, connected: false, mode: '' };
     lives[id] = l;
     $('err').textContent = '';
-    p.img.className = 'hidden';
-    p.empty.className = 'empty';
-    p.empty.textContent = 'Waiting for the camera (it checks in every few seconds)...';
+    showWaiting(p, 'Connecting live video (the camera checks in every few seconds)...');
     updateCard(camById[id]);
+    l.maxTimer = setTimeout(function () {
+      stopLive(id, 'Live view stopped after ' + (LIVE_MAX_MS / 60000) + ' minutes.');
+    }, LIVE_MAX_MS);
+    if (window.RTCPeerConnection) { startRtc(id, l); } else { startFrames(id, l); }
+  }
+
+  function startRtc(id, l) {
+    var p = cards[id];
+    var rid = 'r' + Date.now() + Math.random().toString(36).slice(2, 8);
+    var pc = new RTCPeerConnection(ICE);
+    l.pc = pc;
+    l.mode = 'rtc';
+    pc.addTransceiver('video', { direction: 'recvonly' });
+    pc.ontrack = function (e) {
+      p.vid.srcObject = e.streams[0];
+      p.vid.className = '';
+      p.img.className = 'hidden';
+      p.empty.className = 'hidden';
+      var pr = p.vid.play();
+      if (pr && pr.catch) { pr.catch(function () {}); }
+    };
+    pc.oniceconnectionstatechange = function () {
+      var st = pc.iceConnectionState;
+      if (st === 'connected' || st === 'completed') { l.connected = true; clearTimeout(l.fallbackTimer); }
+      if ((st === 'failed' || st === 'closed') && lives[id] === l && l.mode === 'rtc') {
+        fallback(id, l, 'Direct video failed, using pictures instead.');
+      }
+    };
+    l.fallbackTimer = setTimeout(function () {
+      if (lives[id] === l && !l.connected) {
+        fallback(id, l, 'Direct video did not connect, using pictures instead.');
+      }
+    }, RTC_WAIT_MS);
+
+    pc.createOffer().then(function (o) { return pc.setLocalDescription(o); })
+      .then(function () { return waitIce(pc); })
+      .then(function () {
+        return save(id, { rtc_offer: JSON.stringify({ id: rid, sdp: pc.localDescription.sdp }), rtc_answer: null });
+      }).then(function () {
+        var answered = false;
+        l.poll = setInterval(function () {
+          if (answered || lives[id] !== l) { return; }
+          sb.getRtcAnswer(id).then(function (raw) {
+            if (!raw || answered) { return; }
+            var a;
+            try { a = JSON.parse(raw); } catch (e) { return; }
+            if (a.id !== rid) { return; }
+            answered = true;
+            clearInterval(l.poll);
+            pc.setRemoteDescription({ type: 'answer', sdp: a.sdp }).catch(function () {
+              fallback(id, l, 'Direct video failed, using pictures instead.');
+            });
+          }).catch(function () {});
+        }, 1000);
+      }).catch(function () { fallback(id, l, 'Direct video failed, using pictures instead.'); });
+  }
+
+  function fallback(id, l, msg) {
+    if (lives[id] !== l || l.mode !== 'rtc') { return; }
+    clearInterval(l.poll);
+    clearTimeout(l.fallbackTimer);
+    if (l.pc) { try { l.pc.close(); } catch (e) {} l.pc = null; }
+    var p = cards[id];
+    p.vid.srcObject = null;
+    save(id, { rtc_offer: null });
+    showWaiting(p, msg);
+    startFrames(id, l);
+  }
+
+  function startFrames(id, l) {
+    var p = cards[id];
+    var path = 'live/' + id + '.jpg';
+    l.mode = 'frames';
+    l.url = null;
     sb.deleteObject(path).catch(function () {});       // drop a stale frame from an earlier session
 
     function keepAlive() { save(id, { live_until: new Date(Date.now() + 45000).toISOString() }); }
@@ -333,11 +436,10 @@
 
     function tick() {
       if (lives[id] !== l) { return; }
-      if (Date.now() > l.stopAt) { stopLive(id, 'Live view stopped after 5 minutes.'); return; }
       if (!l.url) {
         sb.signPaths([path]).then(function (map) {
           l.url = map[path] || null;
-          l.timer = setTimeout(tick, l.url ? 0 : 1500);
+          l.timer = setTimeout(tick, l.url ? 0 : 1000);
         }).catch(function () { l.timer = setTimeout(tick, 2000); });
         return;
       }
@@ -346,7 +448,7 @@
         p.empty.className = 'hidden';
         l.timer = setTimeout(tick, LIVE_FRAME_MS);
       };
-      p.img.onerror = function () { l.url = null; l.timer = setTimeout(tick, 1500); };
+      p.img.onerror = function () { l.url = null; l.timer = setTimeout(tick, 1000); };
       p.img.src = l.url + (l.url.indexOf('?') < 0 ? '?' : '&') + 't=' + Date.now();
     }
     tick();
