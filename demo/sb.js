@@ -61,6 +61,34 @@ window.makeSb = function (storeKey) {
       return tokenRequest('password', { email: email, password: password }, email);
     },
     logout: function () { save(null); },
+    // Resolves { needsConfirm: true } when the project requires email confirmation first.
+    signup: function (email, password) {
+      return fetch(cfg.url + '/auth/v1/signup', {
+        method: 'POST',
+        headers: { apikey: cfg.key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, password: password })
+      }).then(function (r) {
+        return r.json().then(function (j) {
+          if (!r.ok) { throw new Error(j.msg || j.error_description || 'Sign-up failed'); }
+          if (!j.access_token) { return { needsConfirm: true }; }
+          save({
+            access_token: j.access_token,
+            refresh_token: j.refresh_token,
+            expires_at: Date.now() + (j.expires_in - 60) * 1000,
+            email: email,
+            user_id: j.user ? j.user.id : ''
+          });
+          return { needsConfirm: false };
+        });
+      });
+    },
+    rpc: function (name, args) {
+      return api('/rest/v1/rpc/' + name, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(args || {})
+      }).then(function (r) { return r.json(); });
+    },
     role: function () {
       return api('/rest/v1/profiles?select=role').then(function (r) { return r.json(); })
         .then(function (rows) { return rows.length ? rows[0].role : null; });

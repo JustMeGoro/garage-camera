@@ -33,11 +33,8 @@
   <h1>Garage camera</h1>
 
   <section id="loginBox" class="hidden">
-    <div class="hint">Log in with the camera account. It can only upload photos, never view them.</div>
-    <input id="email" type="email" placeholder="Camera account email" autocomplete="username">
-    <input id="password" type="password" placeholder="Password" autocomplete="current-password">
-    <button id="loginBtn">Log in</button>
-    <div class="err" id="loginErr"></div>
+    <div class="hint">Use a camera account. It can only upload photos, never view them. Get a "Camera" invite code from the viewer page.</div>
+    <div id="authBox"></div>
   </section>
 
   <div id="camSection" class="hidden">
@@ -87,6 +84,7 @@
 
 <script src="config.js"></script>
 <script src="sb.js"></script>
+<script src="auth.js"></script>
 <script>
 (function () {
   var sb = makeSb('garage_camera_session');
@@ -248,7 +246,7 @@
       sendPush(label);
     }).catch(function (e) {
       entry.textContent += ' - upload failed: ' + e.message;
-      if (!sb.loggedIn()) { showLogin(); }
+      if (!sb.loggedIn()) { showLogin(); auth.show(); }
     });
   }
 
@@ -279,30 +277,17 @@
     document.getElementById('camSection').className = '';
   }
 
-  function checkRole() {
-    sb.role().then(function (role) {
-      if (role !== 'camera') {
-        sb.logout();
-        document.getElementById('loginErr').textContent = 'This account is not a camera account.';
-        showLogin();
-        return;
-      }
-      showCamera();
-    }).catch(function (e) {
-      document.getElementById('loginErr').textContent = e.message;
-      showLogin();
-    });
-  }
+  var auth = GarageAuth.init({
+    sb: sb,
+    el: document.getElementById('authBox'),
+    role: 'camera',
+    onReady: showCamera
+  });
 
-  document.getElementById('loginBtn').onclick = function () {
-    document.getElementById('loginErr').textContent = '';
-    sb.login(document.getElementById('email').value.trim(), document.getElementById('password').value)
-      .then(checkRole)
-      .catch(function (e) { document.getElementById('loginErr').textContent = e.message; });
-  };
-  document.getElementById('logoutBtn').onclick = function () { sb.logout(); showLogin(); };
+  document.getElementById('logoutBtn').onclick = function () { sb.logout(); showLogin(); auth.show(); };
 
-  if (sb.loggedIn()) { checkRole(); } else { showLogin(); }
+  showLogin();
+  auth.start();
 })();
 </script>
 </body>

@@ -17,27 +17,36 @@
   .ev .meta { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; font-size: 14px; }
   .err { color: #e74c3c; font-size: 14px; min-height: 18px; }
   .hidden { display: none; }
+  .hint { font-size: 12px; color: #888; margin: 6px 0; }
+  .invite { background: #1c1c1c; border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; font-size: 14px; }
+  .invite select { width: 100%; padding: 8px; font-size: 15px; margin: 8px 0; }
+  .invite .code { font-size: 22px; letter-spacing: 2px; color: #eee; }
 </style>
 </head>
 <body>
 <main>
   <h1>Garage viewer</h1>
 
-  <section id="loginBox" class="hidden">
-    <input id="email" type="email" placeholder="Email" autocomplete="username">
-    <input id="password" type="password" placeholder="Password" autocomplete="current-password">
-    <button id="loginBtn">Log in</button>
-    <div class="err" id="loginErr"></div>
-  </section>
+  <section id="authBox" class="hidden"></section>
 
   <section id="app" class="hidden">
     <div class="bar"><span id="who"></span><span><button class="grey" id="refreshBtn">Refresh</button><button class="grey" id="logoutBtn">Log out</button></span></div>
     <div class="err" id="err"></div>
+    <details class="invite">
+      <summary>Invite someone</summary>
+      <select id="inviteRole">
+        <option value="viewer">Viewer (sees the photos, e.g. family)</option>
+        <option value="camera">Camera (a phone that uploads photos)</option>
+      </select>
+      <button id="inviteBtn">Create invite code</button>
+      <div id="inviteOut" class="hint"></div>
+    </details>
     <div id="list"></div>
   </section>
 </main>
 <script src="config.js"></script>
 <script src="sb.js"></script>
+<script src="auth.js"></script>
 <script>
 (function () {
   var sb = makeSb('garage_viewer_session');
@@ -45,7 +54,7 @@
   var timer = null;
 
   function show(loggedIn) {
-    $('loginBox').className = loggedIn ? 'hidden' : '';
+    $('authBox').className = loggedIn ? 'hidden' : '';
     $('app').className = loggedIn ? '' : 'hidden';
   }
 
@@ -78,7 +87,7 @@
     });
   }
 
-  function showErr(e) { $('err').textContent = e.message; if (!sb.loggedIn()) { show(false); } }
+  function showErr(e) { $('err').textContent = e.message; if (!sb.loggedIn()) { show(false); auth.show(); } }
 
   function load() {
     $('err').textContent = '';
@@ -89,31 +98,39 @@
     }).catch(showErr);
   }
 
-  function start() {
-    sb.role().then(function (role) {
-      if (role !== 'viewer') {
-        sb.logout();
-        $('loginErr').textContent = 'This account is not a viewer.';
-        show(false);
-        return;
-      }
-      $('who').textContent = sb.email();
-      show(true);
-      load();
-      clearInterval(timer);
-      timer = setInterval(load, 20000);
-    }).catch(function (e) { $('loginErr').textContent = e.message; show(false); });
+  function ready() {
+    $('who').textContent = sb.email();
+    show(true);
+    load();
+    clearInterval(timer);
+    timer = setInterval(load, 20000);
   }
 
-  $('loginBtn').onclick = function () {
-    $('loginErr').textContent = '';
-    sb.login($('email').value.trim(), $('password').value).then(start)
-      .catch(function (e) { $('loginErr').textContent = e.message; });
-  };
-  $('refreshBtn').onclick = load;
-  $('logoutBtn').onclick = function () { sb.logout(); clearInterval(timer); show(false); };
+  var auth = GarageAuth.init({ sb: sb, el: $('authBox'), role: 'viewer', onReady: ready });
 
-  if (sb.loggedIn()) { start(); } else { show(false); }
+  $('refreshBtn').onclick = load;
+  $('logoutBtn').onclick = function () {
+    sb.logout();
+    clearInterval(timer);
+    show(false);
+    auth.show();
+  };
+
+  $('inviteBtn').onclick = function () {
+    var out = $('inviteOut');
+    out.textContent = 'Creating...';
+    sb.rpc('create_invite', { p_role: $('inviteRole').value }).then(function (code) {
+      out.innerHTML = '';
+      var c = document.createElement('div');
+      c.className = 'code';
+      c.textContent = code;
+      out.appendChild(c);
+      out.appendChild(document.createTextNode('One use, valid for 7 days. The person opens this page, creates an account and enters the code.'));
+    }).catch(function (e) { out.textContent = e.message; });
+  };
+
+  show(false);
+  auth.start();
 })();
 </script>
 </body>
