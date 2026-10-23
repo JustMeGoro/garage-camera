@@ -118,6 +118,13 @@ window.makeSb = function (storeKey) {
         body: JSON.stringify(patch)
       });
     },
+    callFunction: function (name, payload) {
+      return api('/functions/v1/' + name, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {})
+      }).then(function (r) { return r.json(); });
+    },
     getRtcAnswer: function (id) {
       return api('/rest/v1/cameras?id=eq.' + id + '&select=rtc_answer')
         .then(function (r) { return r.json(); })

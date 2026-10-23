@@ -94,7 +94,7 @@
     <div id="cams"></div>
     <div class="sechead"><h2>Recent activity</h2><button id="delAll" class="grey small">Delete all photos</button></div>
     <div id="grid" class="grid"></div>
-    <div class="hint" style="margin-top:24px">Version 20261023i</div>
+    <div class="hint" style="margin-top:24px">Version 20261023j</div>
   </main>
 </div>
 
@@ -105,9 +105,9 @@
   </div>
 </div>
 
-<script src="config.js?v=20261023i"></script>
-<script src="sb.js?v=20261023i"></script>
-<script src="auth.js?v=20261023i"></script>
+<script src="config.js?v=20261023j"></script>
+<script src="sb.js?v=20261023j"></script>
+<script src="auth.js?v=20261023j"></script>
 <script>
 (function () {
   var sb = makeSb('garage_viewer_session');
@@ -544,6 +544,28 @@
       topic.onchange();
     };
     tw.appendChild(gen);
+    var testBtn = h('button', 'grey', 'Send test notification');
+    var testOut = h('div', 'hint');
+    testBtn.onclick = function () {
+      var t = topic.value.trim();
+      if (!t) { testOut.textContent = 'Enter or generate a topic first.'; return; }
+      testBtn.disabled = true;
+      testOut.textContent = 'Sending...';
+      // Save the topic first so the test uses what is shown in the box.
+      sb.updateCamera(id, { ntfy_topic: t }).then(function () {
+        return sb.callFunction('camera-test-notify', { id: id });
+      }).then(function (res) {
+        if (res.ok) {
+          testOut.textContent = 'Sent to topic "' + res.topic + '" (ntfy answered ' + res.status + '). In the ntfy app, subscribe to exactly this topic: letters are case-sensitive. It should arrive within a few seconds.';
+        } else {
+          testOut.textContent = 'Not delivered: ' + (res.error || ('ntfy answered ' + res.status + ' ' + (res.detail || '')));
+        }
+      }).catch(function (e) {
+        testOut.textContent = 'Test failed: ' + e.message;
+      }).then(function () { testBtn.disabled = false; });
+    };
+    tw.appendChild(testBtn);
+    tw.appendChild(testOut);
     body.appendChild(tw);
 
     var row = h('div', 'row');
