@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garage camera</title>
+<style>
+  body { margin: 0; font-family: sans-serif; background: #111; color: #eee; }
+  main { max-width: 640px; margin: 0 auto; padding: 12px; }
+  h1 { font-size: 20px; margin: 4px 0 10px; }
+  .view { position: relative; background: #000; }
+  video, canvas.snap { width: 100%; display: block; }
+  .badge { position: absolute; top: 8px; left: 8px; padding: 4px 8px; border-radius: 4px; background: #555; font-size: 14px; }
+  .badge.armed { background: #c0392b; }
+  .badge.motion { background: #e67e22; }
+  .row { margin: 10px 0; }
+  label { display: block; font-size: 13px; color: #aaa; margin-bottom: 2px; }
+  input[type=text] { width: 100%; box-sizing: border-box; padding: 8px; font-size: 16px; }
+  input[type=range] { width: 100%; }
+  button { padding: 12px 16px; font-size: 16px; border: 0; border-radius: 4px; background: #2d7ff9; color: #fff; margin-right: 6px; }
+  button.off { background: #555; }
+  #log { list-style: none; padding: 0; margin: 0; }
+  #log li { display: flex; align-items: center; border-top: 1px solid #333; padding: 6px 0; font-size: 14px; }
+  #log img { width: 96px; margin-right: 10px; }
+  .hint { font-size: 12px; color: #888; }
+  input[type=email], input[type=password] { width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; margin-bottom: 8px; }
+  .err { color: #e74c3c; font-size: 14px; min-height: 18px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Garage camera</h1>
+
+  <section id="loginBox" class="hidden">
+    <div class="hint">Log in with the camera account. It can only upload photos, never view them.</div>
+    <input id="email" type="email" placeholder="Camera account email" autocomplete="username">
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+    <button id="loginBtn">Log in</button>
+    <div class="err" id="loginErr"></div>
+  </section>
+
+  <div id="camSection" class="hidden">
+  <div class="view">
+    <video id="video" autoplay muted playsinline></video>
+    <div id="badge" class="badge">Idle</div>
+  </div>
+
+  <div class="row">
+    <button id="start">Start camera</button>
+    <button id="arm" class="off">Arm</button>
+    <button id="test" class="off">Send test</button>
+  </div>
+
+  <div class="row">
+    <label>Alert topic (optional, text-only push through the ntfy app, no photos)</label>
+    <input type="text" id="topic">
+    <div class="hint">Subscribe to this topic in the ntfy app. The alert says "motion" and links to the viewer page, where you log in to see the photo.</div>
+  </div>
+
+  <div class="row">
+    <label>Sensitivity: <span id="sensVal"></span></label>
+    <input type="range" id="sens" min="1" max="100" value="6">
+  </div>
+
+  <div class="row">
+    <label>Pause between alerts: <span id="coolVal"></span> s</label>
+    <input type="range" id="cool" min="5" max="120" value="30">
+  </div>
+
+  <div class="row">
+    <label>Scene adapts after about <span id="adaptVal"></span> s (a moved car or object stops counting as motion)</label>
+    <input type="range" id="adapt" min="10" max="300" value="60">
+  </div>
+
+  <div class="row">
+    <label>Live motion level (changed pixels)</label>
+    <div style="background:#333;height:10px;position:relative"><div id="meter" style="background:#e67e22;height:10px;width:0"></div><div style="position:absolute;left:33.3%;top:0;width:2px;height:10px;background:#fff"></div></div>
+  </div>
+
+  <ul id="log"></ul>
+  <canvas id="work" width="160" height="120" style="display:none"></canvas>
+  <canvas id="full" style="display:none"></canvas>
+  <button id="logoutBtn" class="off">Log out camera</button>
+  </div>
+</main>
+
+<script src="config.js"></script>
+<script src="sb.js"></script>
+<script>
+(function () {
+  var sb = makeSb('garage_camera_session');
+  var video = document.getElementById('video');
+  var badge = document.getElementById('badge');
+  var work = document.getElementById('work');
+  var wctx = work.getContext('2d');
+  var full = document.getElementById('full');
+  var log = document.getElementById('log');
+  var topicInput = document.getElementById('topic');
+  var sens = document.getElementById('sens');
+  var cool = document.getElementById('cool');
+  var adapt = document.getElementById('adapt');
+  var armBtn = document.getElementById('arm');
+  var testBtn = document.getElementById('test');
+
+  var armed = false;
+  var bg = null;            // reference image of the garage, adapts slowly
+  var cur = new Uint8Array(work.width * work.height);
+  var lastTick = Date.now();
+  var lastAlert = 0;
+  var PIXEL_DIFF = 18;      // brightness change that counts as a changed pixel
+  var hits = 0;             // consecutive checks over the threshold (filters single-frame noise)
+  function sensPct() { return Number(sens.value) / 20; }   // slider 1..100 -> 0.05%..5%
+  var TOTAL = work.width * work.height;
+
+  function store(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
+  function load(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+
+  function randomTopic() {
+    var s = 'garage-';
+    var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    for (var i = 0; i < 10; i++) { s += chars.charAt(Math.floor(Math.random() * chars.length)); }
+    return s;
+  }
+
+  topicInput.value = load('topic') || randomTopic();
+  store('topic', topicInput.value);
+  topicInput.onchange = function () { store('topic', topicInput.value.trim()); };
+  if (load('sens2')) { sens.value = load('sens2'); }
+  if (load('cool')) { cool.value = load('cool'); }
+  if (load('adapt')) { adapt.value = load('adapt'); }
+
+  function showSliders() {
+    document.getElementById('adaptVal').textContent = adapt.value;
+    document.getElementById('sensVal').textContent = 'alert at ' + sensPct().toFixed(2) + '% of the image changing (lower = more sensitive)';
+    document.getElementById('coolVal').textContent = cool.value;
+  }
+  sens.oninput = function () { store('sens2', sens.value); showSliders(); };
+  cool.oninput = function () { store('cool', cool.value); showSliders(); };
+  adapt.oninput = function () { store('adapt', adapt.value); showSliders(); };
+  showSliders();
+
+  function setBadge(text, cls) {
+    badge.textContent = text;
+    badge.className = 'badge' + (cls ? ' ' + cls : '');
+  }
+
+  function getStream() {
+    var constraints = { video: { facingMode: 'environment', width: { ideal: 1280 } }, audio: false };
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      return navigator.mediaDevices.getUserMedia(constraints);
+    }
+    var legacy = navigator.getUserMedia || navigator.webkitGetUserMedia;
+    if (!legacy) { return Promise.reject(new Error('Camera API not available (needs https)')); }
+    return new Promise(function (ok, fail) { legacy.call(navigator, constraints, ok, fail); });
+  }
+
+  document.getElementById('start').onclick = function () {
+    getStream().then(function (stream) {
+      video.srcObject = stream;
+      video.play();
+      setBadge('Camera on');
+      setInterval(tick, 250);
+    }).catch(function (err) {
+      alert('Camera error: ' + err.message);
+    });
+  };
+
+  armBtn.onclick = function () {
+    armed = !armed;
+    bg = null;
+    armBtn.textContent = armed ? 'Disarm' : 'Arm';
+    armBtn.className = armed ? '' : 'off';
+    setBadge(armed ? 'Armed' : 'Camera on', armed ? 'armed' : '');
+  };
+
+  function tick() {
+    if (!video.videoWidth) { return; }
+    wctx.drawImage(video, 0, 0, work.width, work.height);
+    var data = wctx.getImageData(0, 0, work.width, work.height).data;
+    var now = Date.now();
+    var dt = (now - lastTick) / 1000;
+    lastTick = now;
+    // How fast the reference absorbs the current scene (exponential average over adapt seconds)
+    var alpha = 1 - Math.exp(-dt / Number(adapt.value));
+    var changed = 0;
+    for (var i = 0, p = 0; i < data.length; i += 4, p++) {
+      var g = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
+      if (bg) {
+        if (Math.abs(g - bg[p]) > PIXEL_DIFF) { changed++; }
+        bg[p] += (g - bg[p]) * alpha;
+      }
+      cur[p] = g;
+    }
+    if (!bg) { bg = new Float32Array(cur); }
+    var pct = changed * 100 / TOTAL;
+    // Meter: the orange mark at 1/3 is the alert threshold
+    document.getElementById('meter').style.width = Math.min(100, pct / (sensPct() * 3) * 100) + '%';
+    if (!armed) { return; }
+    hits = pct >= sensPct() ? hits + 1 : 0;
+    if (hits >= 2 && now - lastAlert > Number(cool.value) * 1000) {
+      hits = 0;
+      lastAlert = now;
+      setBadge('MOTION', 'motion');
+      setTimeout(function () { if (armed) { setBadge('Armed', 'armed'); } }, 3000);
+      capture(function (blob, thumbUrl) { alertMotion(blob, thumbUrl, 'motion', pct); });
+    }
+  }
+
+  // Photos are scaled down (max 960 px wide) to keep the upload small on a weak connection.
+  function capture(done) {
+    var scale = Math.min(1, 960 / video.videoWidth);
+    full.width = Math.round(video.videoWidth * scale);
+    full.height = Math.round(video.videoHeight * scale);
+    full.getContext('2d').drawImage(video, 0, 0, full.width, full.height);
+    var url = full.toDataURL('image/jpeg', 0.6);
+    if (full.toBlob) {
+      full.toBlob(function (b) { done(b, url); }, 'image/jpeg', 0.6);
+    } else {
+      var bin = atob(url.split(',')[1]);
+      var arr = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) { arr[i] = bin.charCodeAt(i); }
+      done(new Blob([arr], { type: 'image/jpeg' }), url);
+    }
+  }
+
+  function addLog(thumbUrl, text) {
+    var li = document.createElement('li');
+    var img = document.createElement('img');
+    img.src = thumbUrl;
+    var span = document.createElement('span');
+    span.textContent = new Date().toLocaleTimeString() + ' ' + text;
+    li.appendChild(img);
+    li.appendChild(span);
+    log.insertBefore(li, log.firstChild);
+  }
+
+  // Upload the photo to the private bucket, record the event, then send a text-only push.
+  function alertMotion(blob, thumbUrl, kind, pct) {
+    var label = kind === 'test' ? 'Test alert' : 'Motion in the garage';
+    addLog(thumbUrl, label);
+    var entry = log.firstChild.lastChild;
+    var path = sb.userId() + '/' + Date.now() + '.jpg';
+    sb.upload(path, blob).then(function () {
+      return sb.insertEvent({ kind: kind, photo_path: path, motion_pct: pct ? Math.round(pct * 100) / 100 : null });
+    }).then(function () {
+      entry.textContent += ' - uploaded';
+      sendPush(label);
+    }).catch(function (e) {
+      entry.textContent += ' - upload failed: ' + e.message;
+      if (!sb.loggedIn()) { showLogin(); }
+    });
+  }
+
+  function sendPush(label) {
+    var topic = topicInput.value.trim();
+    if (!topic) { return; }
+    var viewer = location.href.replace(/camera\.html.*$/, 'viewer.html');
+    fetch('https://ntfy.sh/' + encodeURIComponent(topic), {
+      method: 'POST',
+      headers: { 'Title': label, 'Tags': 'warning,camera', 'Priority': '4', 'Click': viewer },
+      body: new Date().toLocaleTimeString() + ' - open the viewer to see the photo'
+    }).catch(function () {});
+  }
+
+  testBtn.onclick = function () {
+    if (!video.videoWidth) { alert('Start the camera first'); return; }
+    capture(function (blob, thumbUrl) { alertMotion(blob, thumbUrl, 'test', null); });
+  };
+  testBtn.className = '';
+
+  function showLogin() {
+    document.getElementById('loginBox').className = '';
+    document.getElementById('camSection').className = 'hidden';
+  }
+
+  function showCamera() {
+    document.getElementById('loginBox').className = 'hidden';
+    document.getElementById('camSection').className = '';
+  }
+
+  function checkRole() {
+    sb.role().then(function (role) {
+      if (role !== 'camera') {
+        sb.logout();
+        document.getElementById('loginErr').textContent = 'This account is not a camera account.';
+        showLogin();
+        return;
+      }
+      showCamera();
+    }).catch(function (e) {
+      document.getElementById('loginErr').textContent = e.message;
+      showLogin();
+    });
+  }
+
+  document.getElementById('loginBtn').onclick = function () {
+    document.getElementById('loginErr').textContent = '';
+    sb.login(document.getElementById('email').value.trim(), document.getElementById('password').value)
+      .then(checkRole)
+      .catch(function (e) { document.getElementById('loginErr').textContent = e.message; });
+  };
+  document.getElementById('logoutBtn').onclick = function () { sb.logout(); showLogin(); };
+
+  if (sb.loggedIn()) { checkRole(); } else { showLogin(); }
+})();
+</script>
+</body>
+</html>

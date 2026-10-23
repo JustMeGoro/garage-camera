@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garage viewer</title>
+<style>
+  body { margin: 0; font-family: sans-serif; background: #111; color: #eee; }
+  main { max-width: 720px; margin: 0 auto; padding: 12px; }
+  h1 { font-size: 20px; margin: 4px 0 10px; }
+  input { width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; margin-bottom: 8px; }
+  button { padding: 10px 14px; font-size: 15px; border: 0; border-radius: 4px; background: #2d7ff9; color: #fff; margin-right: 6px; }
+  button.grey { background: #555; }
+  .bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 14px; color: #aaa; }
+  .ev { background: #1c1c1c; border-radius: 6px; margin-bottom: 12px; overflow: hidden; }
+  .ev img { width: 100%; display: block; background: #000; min-height: 80px; }
+  .ev .meta { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; font-size: 14px; }
+  .err { color: #e74c3c; font-size: 14px; min-height: 18px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Garage viewer</h1>
+
+  <section id="loginBox" class="hidden">
+    <input id="email" type="email" placeholder="Email" autocomplete="username">
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+    <button id="loginBtn">Log in</button>
+    <div class="err" id="loginErr"></div>
+  </section>
+
+  <section id="app" class="hidden">
+    <div class="bar"><span id="who"></span><span><button class="grey" id="refreshBtn">Refresh</button><button class="grey" id="logoutBtn">Log out</button></span></div>
+    <div class="err" id="err"></div>
+    <div id="list"></div>
+  </section>
+</main>
+<script src="config.js"></script>
+<script src="sb.js"></script>
+<script>
+(function () {
+  var sb = makeSb('garage_viewer_session');
+  var $ = function (id) { return document.getElementById(id); };
+  var timer = null;
+
+  function show(loggedIn) {
+    $('loginBox').className = loggedIn ? 'hidden' : '';
+    $('app').className = loggedIn ? '' : 'hidden';
+  }
+
+  function render(events, urls) {
+    var list = $('list');
+    list.innerHTML = '';
+    if (!events.length) { list.textContent = 'No events yet.'; return; }
+    events.forEach(function (e) {
+      var box = document.createElement('div');
+      box.className = 'ev';
+      var img = document.createElement('img');
+      img.src = urls[e.photo_path] || '';
+      img.alt = 'photo';
+      var meta = document.createElement('div');
+      meta.className = 'meta';
+      var when = document.createElement('span');
+      when.textContent = new Date(e.created_at).toLocaleString() + (e.kind === 'test' ? ' (test)' : '');
+      var del = document.createElement('button');
+      del.className = 'grey';
+      del.textContent = 'Delete';
+      del.onclick = function () {
+        if (!confirm('Delete this photo?')) { return; }
+        sb.deleteEvent(e.id, e.photo_path).then(load).catch(showErr);
+      };
+      meta.appendChild(when);
+      meta.appendChild(del);
+      box.appendChild(img);
+      box.appendChild(meta);
+      list.appendChild(box);
+    });
+  }
+
+  function showErr(e) { $('err').textContent = e.message; if (!sb.loggedIn()) { show(false); } }
+
+  function load() {
+    $('err').textContent = '';
+    return sb.listEvents(50).then(function (events) {
+      return sb.signPaths(events.map(function (e) { return e.photo_path; })).then(function (urls) {
+        render(events, urls);
+      });
+    }).catch(showErr);
+  }
+
+  function start() {
+    sb.role().then(function (role) {
+      if (role !== 'viewer') {
+        sb.logout();
+        $('loginErr').textContent = 'This account is not a viewer.';
+        show(false);
+        return;
+      }
+      $('who').textContent = sb.email();
+      show(true);
+      load();
+      clearInterval(timer);
+      timer = setInterval(load, 20000);
+    }).catch(function (e) { $('loginErr').textContent = e.message; show(false); });
+  }
+
+  $('loginBtn').onclick = function () {
+    $('loginErr').textContent = '';
+    sb.login($('email').value.trim(), $('password').value).then(start)
+      .catch(function (e) { $('loginErr').textContent = e.message; });
+  };
+  $('refreshBtn').onclick = load;
+  $('logoutBtn').onclick = function () { sb.logout(); clearInterval(timer); show(false); };
+
+  if (sb.loggedIn()) { start(); } else { show(false); }
+})();
+</script>
+</body>
+</html>
