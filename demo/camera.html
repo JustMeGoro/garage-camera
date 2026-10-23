@@ -34,7 +34,7 @@
 
   <section id="loginBox" class="hidden">
     <div class="hint">Enter the camera code. Create one on the viewer page under "Cameras". The code only lets this phone upload photos, never view them.</div>
-    <input id="codeIn" type="text" placeholder="Camera code" autocapitalize="characters" autocomplete="off">
+    <input id="codeIn" type="text" placeholder="Camera code (case-sensitive)" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off">
     <button id="codeSave">Save code</button>
     <div class="err" id="codeErr"></div>
   </section>
@@ -290,8 +290,8 @@
   }
 
   document.getElementById('codeSave').onclick = function () {
-    var code = document.getElementById('codeIn').value.trim().toUpperCase();
-    if (code.length < 16) {
+    var code = document.getElementById('codeIn').value.trim();
+    if (code.length < 8) {
       document.getElementById('codeErr').textContent = 'That code looks too short.';
       return;
     }
