@@ -53,10 +53,10 @@
   <canvas id="liveC" style="display:none"></canvas>
 </main>
 
-<script src="config.js?v=20261023h"></script>
+<script src="config.js?v=20261023i"></script>
 <script>
 (function () {
-  var BUILD = '20261023h';      // keep equal to version.json; the page reloads itself when they differ
+  var BUILD = '20261023i';      // keep equal to version.json; the page reloads itself when they differ
   var cfg = window.GARAGE_CONFIG;
   var CODE_KEY = 'garage_camera_code';
   var SETTINGS_KEY = 'garage_camera_settings';
@@ -82,6 +82,13 @@
   var lastAlert = 0;
   var hits = 0;                // consecutive checks over the threshold (filters single-frame noise)
   var noise = 0;               // learned background noise (% of pixels), so noise alone never triggers
+  var episodeActive = false;   // confirmed movement is going on (an alert episode)
+  var episodeStart = 0;
+  var lastNotify = 0;
+  var lastMotionAt = 0;        // last time movement was seen above the trigger level
+  var activeMs = 0;            // movement time collected towards confirmation
+  var CONFIRM_MS = 1200;       // movement needed to confirm (strong movement counts double)
+  var END_QUIET_MS = 10000;    // quiet time that ends an episode
   var haveLast = false;        // cur holds a previous frame
   var lastMoveAt = 0;          // last time something moved between two frames
   var staticChange = false;    // the picture differs from the reference but nothing moves
@@ -115,6 +122,7 @@
 
   function showArmState() {
     if (!started) { return; }
+    if (episodeActive) { setBadge('MOTION', 'motion'); return; }
     setBadge(settings.armed ? 'Armed' : 'Disarmed', settings.armed ? 'armed' : '');
   }
 
@@ -210,18 +218,66 @@
       lastDiag = now;
       diagEl.textContent = 'change ' + pct.toFixed(2) + '% | trigger ' + thr.toFixed(2) + '% | noise ' + noise.toFixed(2) + '%' + (moving ? ' | moving' : '');
     }
-    if (!settings.armed) { hits = 0; return; }
-    hits = pct >= thr && moving ? hits + 1 : 0;
-    // Strong motion triggers at once; weaker motion must be seen twice in a row.
+    if (!settings.armed) {
+      hits = 0;
+      activeMs = 0;
+      if (episodeActive) { episodeActive = false; showArmState(); }
+      return;
+    }
+    var motionNow = pct >= thr && moving;
+    hits = motionNow ? hits + 1 : 0;
+
+    // 1) Instant photos at the first sign of movement (not while an alert episode is running).
+    //    Strong motion triggers at once; weaker motion must be seen twice in a row.
     var strong = pct >= thr * 2;
-    var gap = Math.min(Number(settings.cooldown_s), 5) * 1000;      // short gap between episodes
-    if ((hits >= 2 || (strong && hits >= 1)) && now - lastEpisode > gap) {
+    var gap = Math.min(Number(settings.cooldown_s), 5) * 1000;
+    if (!episodeActive && (hits >= 2 || (strong && hits >= 1)) && now - lastEpisode > gap) {
       hits = 0;
       lastEpisode = now;
-      setBadge('MOTION', 'motion');
-      setTimeout(showArmState, 3000);
       burst();
     }
+
+    // 2) Alert episode. Movement must add up to about a second to count as confirmed (strong movement
+    //    counts double), so a quick rustle does nothing. Confirmed movement alerts at once, repeats every
+    //    "pause" seconds while it continues, and the episode ends after a quiet period without a message.
+    var dtc = Math.min(dt, 0.4) * 1000;
+    if (motionNow) {
+      lastMotionAt = now;
+      activeMs += pct >= thr * 3 ? dtc * 2 : dtc;
+    } else {
+      activeMs = Math.max(0, activeMs - dtc * 0.5);
+    }
+    var pauseMs = Math.max(5, Number(settings.cooldown_s)) * 1000;
+    if (!episodeActive) {
+      if (activeMs >= CONFIRM_MS) { startEpisode(now); }
+    } else if (now - lastMotionAt > END_QUIET_MS) {
+      episodeActive = false;
+      activeMs = 0;
+      showArmState();
+    } else if (now - lastNotify >= pauseMs && lastMotionAt > lastNotify && now - lastMotionAt < 3000) {
+      lastNotify = now;
+      notify('ongoing');
+      capture(function (blob) { queuePhoto(blob, lastPct); });
+    }
+  }
+
+  function startEpisode(now) {
+    episodeActive = true;
+    episodeStart = now;
+    lastNotify = now;
+    setBadge('MOTION', 'motion');
+    notify('start');
+    capture(function (blob) { queuePhoto(blob, lastPct); });
+  }
+
+  // Ask the server to send the text-only push (the server knows the ntfy topic, the camera does not).
+  function notify(type) {
+    fn('?action=notify', {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: type, seconds: Math.round((Date.now() - episodeStart) / 1000) })
+    }).then(function (r) {
+      if (r.status === 401) { codeRejected(); }
+    }).catch(function () {});
   }
 
   // Take the photos right now (at 0, 0.5 and 1.2 s) and upload them afterwards from the queue.

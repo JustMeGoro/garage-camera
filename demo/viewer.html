@@ -94,7 +94,7 @@
     <div id="cams"></div>
     <div class="sechead"><h2>Recent activity</h2><button id="delAll" class="grey small">Delete all photos</button></div>
     <div id="grid" class="grid"></div>
-    <div class="hint" style="margin-top:24px">Version 20261023h</div>
+    <div class="hint" style="margin-top:24px">Version 20261023i</div>
   </main>
 </div>
 
@@ -105,9 +105,9 @@
   </div>
 </div>
 
-<script src="config.js?v=20261023h"></script>
-<script src="sb.js?v=20261023h"></script>
-<script src="auth.js?v=20261023h"></script>
+<script src="config.js?v=20261023i"></script>
+<script src="sb.js?v=20261023i"></script>
+<script src="auth.js?v=20261023i"></script>
 <script>
 (function () {
   var sb = makeSb('garage_viewer_session');
@@ -513,8 +513,8 @@
     slider(body, 'Sensitivity', 1, 100, c.sensitivity,
       function (v) { return 'alert at ' + (v / 20).toFixed(2) + '% of the image changing (lower = more sensitive)'; },
       function (v) { save(id, { sensitivity: v }); });
-    slider(body, 'Pause between alerts', 5, 600, c.cooldown_s,
-      function (v) { return v + ' s'; },
+    slider(body, 'Repeat the alert while movement continues', 5, 600, c.cooldown_s,
+      function (v) { return 'every ' + v + ' s (the first alert comes at once, nothing is sent after the movement stops)'; },
       function (v) { save(id, { cooldown_s: v }); });
     slider(body, 'Scene adapts after', 10, 300, c.adapt_s,
       function (v) { return 'about ' + v + ' s (a moved car or object stops counting as motion)'; },
