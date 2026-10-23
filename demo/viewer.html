@@ -5,61 +5,102 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Garage viewer</title>
 <style>
-  body { margin: 0; font-family: sans-serif; background: #111; color: #eee; }
-  main { max-width: 720px; margin: 0 auto; padding: 12px; }
-  h1 { font-size: 20px; margin: 4px 0 10px; }
-  input { width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; margin-bottom: 8px; }
-  button { padding: 10px 14px; font-size: 15px; border: 0; border-radius: 4px; background: #2d7ff9; color: #fff; margin-right: 6px; }
-  button.grey { background: #555; }
-  .bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 14px; color: #aaa; }
-  .ev { background: #1c1c1c; border-radius: 6px; margin-bottom: 12px; overflow: hidden; }
-  .ev img { width: 100%; display: block; background: #000; min-height: 80px; }
-  .ev .meta { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; font-size: 14px; }
-  .err { color: #e74c3c; font-size: 14px; min-height: 18px; }
-  .hidden { display: none; }
-  .hint { font-size: 12px; color: #888; margin: 6px 0; }
-  .invite { background: #1c1c1c; border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; font-size: 14px; }
-  .invite select { width: 100%; padding: 8px; font-size: 15px; margin: 8px 0; }
-  .invite .code { font-size: 22px; letter-spacing: 2px; color: #eee; }
-  .cam { border-top: 1px solid #333; padding: 10px 0; }
-  .camhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .status.on { color: #2ecc71; }
-  .status.off { color: #e67e22; }
-  .setting { margin: 10px 0; }
-  .setting label, .cam > label { display: block; font-size: 13px; color: #aaa; margin: 8px 0 2px; }
-  .setting input[type=range] { width: 100%; padding: 0; }
-  .bar2 { background: #333; height: 10px; position: relative; margin-bottom: 10px; }
-  .meter { background: #e67e22; height: 10px; width: 0; }
+  :root { --bg: #0e0f12; --card: #181a1f; --line: #2a2d34; --text: #eceef2; --mute: #8b909b; --accent: #3b82f6; --red: #ef4444; --green: #22c55e; --amber: #f59e0b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  .hidden { display: none !important; }
+  button { font: inherit; border: 0; border-radius: 8px; background: var(--accent); color: #fff; padding: 10px 14px; cursor: pointer; }
+  button.grey, button.off { background: #3a3d45; }
+  button.danger { background: #7f1d1d; }
+  button:disabled { opacity: .6; cursor: default; }
+  input[type=email], input[type=password], input[type=text] { width: 100%; padding: 11px; font-size: 16px; margin-bottom: 8px; border-radius: 8px; border: 1px solid var(--line); background: #111318; color: var(--text); }
+  input[type=range] { width: 100%; }
+  .hint { font-size: 12px; color: var(--mute); margin: 6px 0; }
+  .err { color: var(--red); font-size: 14px; min-height: 18px; }
+
+  .authwrap { max-width: 380px; margin: 0 auto; padding: 24px 16px; }
+
+  header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  .brand { font-weight: 600; letter-spacing: .3px; }
+  .who { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--mute); }
+  .who span { max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button.icon { background: transparent; color: var(--text); padding: 7px; border-radius: 50%; line-height: 0; }
+  button.icon:hover { background: #23262d; }
+  button.icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+  main { max-width: 880px; margin: 0 auto; padding: 14px 16px 40px; }
+  .err.top { margin-bottom: 8px; }
+
+  .hero { position: relative; background: #000; border-radius: 14px; overflow: hidden; aspect-ratio: 4 / 3; margin-bottom: 16px; border: 1px solid var(--line); }
+  .hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .hero .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--mute); font-size: 14px; text-align: center; padding: 20px; }
+  .pill { position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,.6); padding: 5px 11px; border-radius: 999px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--mute); }
+  .pill.armed::before { background: var(--red); }
+  .pill.online::before { background: var(--green); }
+  .pill.warn::before { background: var(--amber); }
+  .pill.live::before { background: var(--red); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .gear { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,.6); color: #fff; }
+  .gear:hover { background: rgba(0,0,0,.8); }
+  .foot { position: absolute; left: 0; right: 0; bottom: 0; padding: 28px 14px 12px; background: linear-gradient(transparent, rgba(0,0,0,.75)); display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; }
+  .foot b { display: block; font-size: 17px; }
+  .foot small { color: #c4c8d0; font-size: 12px; }
+  .foot button { background: rgba(255,255,255,.18); padding: 8px 12px; white-space: nowrap; }
+
+  h2 { font-size: 15px; font-weight: 600; margin: 22px 0 10px; color: var(--mute); text-transform: uppercase; letter-spacing: .6px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .thumb { padding: 0; background: var(--card); border: 1px solid var(--line); text-align: left; overflow: hidden; border-radius: 10px; }
+  .thumb img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: #000; }
+  .thumb span { display: block; padding: 6px 8px; font-size: 12px; color: var(--mute); }
+
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: flex; align-items: flex-end; justify-content: center; z-index: 20; }
+  .sheet { background: var(--card); width: 100%; max-width: 520px; max-height: 92vh; overflow-y: auto; border-radius: 16px 16px 0 0; padding: 14px 16px 22px; }
+  @media (min-width: 640px) { .modal { align-items: center; } .sheet { border-radius: 16px; } }
+  .sheethead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .sheethead b { font-size: 17px; }
+  .setting { margin: 14px 0; }
+  .setting label { display: block; font-size: 13px; color: var(--mute); margin-bottom: 4px; }
+  .bar2 { background: #2a2d34; height: 10px; border-radius: 5px; position: relative; overflow: hidden; }
+  .meter { background: var(--amber); height: 10px; width: 0; transition: width .3s; }
   .mark { position: absolute; left: 33.3%; top: 0; width: 2px; height: 10px; background: #fff; }
-  .cam button { margin: 6px 6px 0 0; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .code { font-size: 24px; letter-spacing: 2px; margin: 12px 0; word-break: break-all; user-select: all; }
+  .big { width: 100%; border-radius: 10px; display: block; margin-bottom: 10px; background: #000; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Garage viewer</h1>
 
-  <section id="authBox" class="hidden"></section>
+<div id="authWrap" class="authwrap hidden">
+  <h1>Garage</h1>
+  <div id="authBox"></div>
+</div>
 
-  <section id="app" class="hidden">
-    <div class="bar"><span id="who"></span><span><button class="grey" id="refreshBtn">Refresh</button><button class="grey" id="logoutBtn">Log out</button></span></div>
-    <div class="err" id="err"></div>
-    <details class="invite">
-      <summary>Cameras</summary>
-      <div id="camList" class="hint"></div>
-      <div class="hint">Add a new camera:</div>
-      <input id="camName" type="text" placeholder="Name, e.g. Garage" style="width:100%;box-sizing:border-box;padding:8px;font-size:15px;margin:8px 0">
-      <button id="camBtn">Add camera</button>
-      <div id="camOut" class="hint"></div>
-    </details>
-    <details class="invite">
-      <summary>Invite a family member</summary>
-      <div class="hint">They will be able to see all photos.</div>
-      <button id="inviteBtn">Create invite code</button>
-      <div id="inviteOut" class="hint"></div>
-    </details>
-    <div id="list"></div>
-  </section>
-</main>
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">Garage</div>
+    <div class="who">
+      <span id="who"></span>
+      <button class="icon" id="addCamBtn" title="Add a camera"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-2h6l2 2h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><path d="M12 10.5v5M9.5 13h5"/></svg></button>
+      <button class="icon" id="inviteBtn" title="Invite someone"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.5 3.2-5.5 6.5-5.5s5.9 2 6.5 5.5"/><path d="M19 8v6M16 11h6"/></svg></button>
+      <button class="icon" id="logoutBtn" title="Log out"><svg viewBox="0 0 24 24"><path d="M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h5"/><path d="M15 8l4 4-4 4M19 12H9"/></svg></button>
+    </div>
+  </header>
+  <main>
+    <div class="err top" id="err"></div>
+    <div id="cams"></div>
+    <h2>Recent activity</h2>
+    <div id="grid" class="grid"></div>
+  </main>
+</div>
+
+<div id="modal" class="modal hidden">
+  <div class="sheet">
+    <div class="sheethead"><b id="mTitle"></b><button class="icon" id="mClose" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div id="mBody"></div>
+  </div>
+</div>
+
 <script src="config.js"></script>
 <script src="sb.js"></script>
 <script src="auth.js"></script>
@@ -67,159 +108,232 @@
 (function () {
   var sb = makeSb('garage_viewer_session');
   var $ = function (id) { return document.getElementById(id); };
-  var timer = null;
+
+  var camById = {};          // camera id -> latest row from the server
+  var camOrder = '';
+  var cards = {};            // camera id -> card elements
+  var events = [];
+  var urls = {};             // photo path -> signed url
+  var lives = {};            // camera id -> running live view
+  var prevSnap = {};
+  var modalState = null;     // { update(cam) } while a camera settings modal is open
+  var LIVE_MAX_MS = 5 * 60 * 1000;
+  var LIVE_FRAME_MS = 800;
+  var ONLINE_MS = 30000;
+
+  // ---------- small helpers ----------
+  function h(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) { e.className = cls; }
+    if (text != null) { e.textContent = text; }
+    return e;
+  }
+  function when(iso) { return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+  function showErr(e) {
+    $('err').textContent = e && e.message ? e.message : '';
+    if (!sb.loggedIn()) { show(false); auth.show(); }
+  }
+  function save(id, patch) {
+    var c = camById[id];
+    if (c) { for (var k in patch) { c[k] = patch[k]; } }
+    return sb.updateCamera(id, patch).catch(showErr);
+  }
+  function isOnline(c) { return c.pinged_at && (Date.now() - new Date(c.pinged_at).getTime()) < ONLINE_MS; }
 
   function show(loggedIn) {
-    $('authBox').className = loggedIn ? 'hidden' : '';
+    $('authWrap').className = 'authwrap' + (loggedIn ? ' hidden' : '');
     $('app').className = loggedIn ? '' : 'hidden';
   }
 
-  function render(events, urls) {
-    var list = $('list');
-    list.innerHTML = '';
-    if (!events.length) { list.textContent = 'No events yet.'; return; }
+  // ---------- modal ----------
+  function openModal(title, body, state) {
+    $('mTitle').textContent = title;
+    var box = $('mBody');
+    box.innerHTML = '';
+    box.appendChild(body);
+    modalState = state || null;
+    $('modal').className = 'modal';
+  }
+  function closeModal() { $('modal').className = 'modal hidden'; modalState = null; }
+  $('mClose').onclick = closeModal;
+  $('modal').onclick = function (e) { if (e.target === $('modal')) { closeModal(); } };
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal(); } });
+
+  // ---------- camera cards ----------
+  function status(c) {
+    if (lives[c.id]) { return { text: 'Live', cls: 'live' }; }
+    if (!c.pinged_at) { return { text: 'Not connected yet', cls: 'warn' }; }
+    if (!isOnline(c)) { return { text: 'Offline', cls: 'warn' }; }
+    return c.armed ? { text: 'Armed', cls: 'armed' } : { text: 'Online, not armed', cls: 'online' };
+  }
+
+  function latestEvent(camId) {
+    for (var i = 0; i < events.length; i++) { if (events[i].camera_id === camId) { return events[i]; } }
+    return null;
+  }
+
+  function buildCard(c) {
+    var hero = h('div', 'hero');
+    var img = h('img'); img.alt = ''; img.className = 'hidden';
+    var empty = h('div', 'empty', 'No photo yet');
+    var pill = h('div', 'pill');
+    var gear = h('button', 'icon gear');
+    gear.title = 'Settings';
+    gear.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
+    var foot = h('div', 'foot');
+    var info = h('div');
+    var name = h('b', '', c.name);
+    var sub = h('small');
+    info.appendChild(name); info.appendChild(sub);
+    var liveBtn = h('button', '', 'Live');
+    foot.appendChild(info); foot.appendChild(liveBtn);
+    hero.appendChild(img); hero.appendChild(empty); hero.appendChild(pill); hero.appendChild(gear); hero.appendChild(foot);
+
+    var p = { root: hero, img: img, empty: empty, pill: pill, name: name, sub: sub, liveBtn: liveBtn, shownPath: null };
+    cards[c.id] = p;
+    gear.onclick = function () { openSettings(c.id); };
+    liveBtn.onclick = function () { if (lives[c.id]) { stopLive(c.id); } else { startLive(c.id); } };
+    return hero;
+  }
+
+  function updateCard(c) {
+    var p = cards[c.id];
+    if (!p) { return; }
+    var st = status(c);
+    p.pill.textContent = st.text;
+    p.pill.className = 'pill ' + st.cls;
+    p.name.textContent = c.name;
+    var ev = latestEvent(c.id);
+    var online = isOnline(c);
+    p.sub.textContent = ev ? 'Last photo ' + when(ev.created_at) : (online ? 'Waiting for the first motion' : (c.pinged_at ? 'Last seen ' + when(c.pinged_at) : ''));
+    p.liveBtn.textContent = lives[c.id] ? 'Stop' : 'Live';
+    if (lives[c.id]) { return; }              // the live view owns the picture
+    var path = ev ? ev.photo_path : null;
+    if (path !== p.shownPath) {
+      p.shownPath = path;
+      if (path && urls[path]) {
+        p.img.src = urls[path];
+        p.img.className = '';
+        p.empty.className = 'hidden';
+      } else {
+        p.img.className = 'hidden';
+        p.empty.textContent = 'No photo yet';
+        p.empty.className = 'empty';
+      }
+    }
+  }
+
+  function renderCams(list) {
+    var order = list.map(function (c) { return c.id; }).join(',');
+    list.forEach(function (c) { camById[c.id] = c; });
+    var box = $('cams');
+    if (order !== camOrder) {
+      Object.keys(lives).forEach(function (id) { stopLive(id); });
+      camOrder = order;
+      cards = {};
+      box.innerHTML = '';
+      if (!list.length) {
+        var none = h('div', 'hero');
+        var e = h('div', 'empty');
+        e.appendChild(document.createTextNode('No camera yet. Tap the camera icon at the top to add one.'));
+        none.appendChild(e);
+        box.appendChild(none);
+      }
+      list.forEach(function (c) { box.appendChild(buildCard(c)); });
+    }
+    list.forEach(function (c) {
+      var wasSnap = prevSnap[c.id];
+      prevSnap[c.id] = c.snapshot_requested;
+      updateCard(c);
+      if (wasSnap && !c.snapshot_requested) { loadEvents(); }   // the requested photo has arrived
+    });
+    if (modalState && modalState.update) { modalState.update(camById[modalState.id]); }
+  }
+
+  function loadCams() {
+    return sb.listCameras().then(function (list) {
+      if (!Object.keys(lives).length) { $('err').textContent = ''; }
+      renderCams(list);
+    }).catch(showErr);
+  }
+
+  // ---------- recent activity ----------
+  function renderGrid() {
+    var g = $('grid');
+    g.innerHTML = '';
+    if (!events.length) { g.appendChild(h('div', 'hint', 'No photos yet.')); return; }
     events.forEach(function (e) {
-      var box = document.createElement('div');
-      box.className = 'ev';
-      var img = document.createElement('img');
-      img.src = urls[e.photo_path] || '';
-      img.alt = 'photo';
-      var meta = document.createElement('div');
-      meta.className = 'meta';
-      var when = document.createElement('span');
-      when.textContent = new Date(e.created_at).toLocaleString() + (e.kind === 'test' ? ' (test)' : '');
-      var del = document.createElement('button');
-      del.className = 'grey';
-      del.textContent = 'Delete';
-      del.onclick = function () {
-        if (!confirm('Delete this photo?')) { return; }
-        sb.deleteEvent(e.id, e.photo_path).then(load).catch(showErr);
-      };
-      meta.appendChild(when);
-      meta.appendChild(del);
-      box.appendChild(img);
-      box.appendChild(meta);
-      list.appendChild(box);
+      var b = h('button', 'thumb');
+      var im = h('img'); im.alt = ''; im.loading = 'lazy';
+      if (urls[e.photo_path]) { im.src = urls[e.photo_path]; }
+      var cam = camById[e.camera_id];
+      var kind = e.kind === 'motion' ? '' : ' (' + e.kind + ')';
+      b.appendChild(im);
+      b.appendChild(h('span', '', when(e.created_at) + kind + (cam ? ' - ' + cam.name : '')));
+      b.onclick = function () { openPhoto(e); };
+      g.appendChild(b);
     });
   }
 
-  function showErr(e) { $('err').textContent = e.message; if (!sb.loggedIn()) { show(false); auth.show(); } }
+  function openPhoto(e) {
+    var body = h('div');
+    var im = h('img', 'big'); im.src = urls[e.photo_path] || '';
+    body.appendChild(im);
+    var cam = camById[e.camera_id];
+    body.appendChild(h('div', 'hint', when(e.created_at) + (cam ? ' - ' + cam.name : '') + (e.kind !== 'motion' ? ' (' + e.kind + ')' : '')));
+    var del = h('button', 'danger', 'Delete photo');
+    del.onclick = function () {
+      if (!confirm('Delete this photo?')) { return; }
+      sb.deleteEvent(e.id, e.photo_path).then(function () { closeModal(); loadEvents(); }).catch(showErr);
+    };
+    var row = h('div', 'row'); row.appendChild(del); body.appendChild(row);
+    openModal('Photo', body);
+  }
 
-  function load() {
-    $('err').textContent = '';
-    return sb.listEvents(50).then(function (events) {
-      return sb.signPaths(events.map(function (e) { return e.photo_path; })).then(function (urls) {
-        render(events, urls);
+  function loadEvents() {
+    return sb.listEvents(60).then(function (list) {
+      return sb.signPaths(list.map(function (e) { return e.photo_path; })).then(function (map) {
+        events = list;
+        urls = map;
+        renderGrid();
+        Object.keys(camById).forEach(function (id) { updateCard(camById[id]); });
       });
     }).catch(showErr);
   }
 
-  function ready() {
-    $('who').textContent = sb.email();
-    show(true);
-    load();
-    loadCameras();
-    clearInterval(timer);
-    timer = setInterval(load, 20000);
-  }
-
-  var auth = GarageAuth.init({ sb: sb, el: $('authBox'), role: 'viewer', onReady: ready });
-
-  $('refreshBtn').onclick = load;
-  $('logoutBtn').onclick = function () {
-    sb.logout();
-    clearInterval(timer);
-    show(false);
-    auth.show();
-  };
-
-  $('inviteBtn').onclick = function () {
-    var out = $('inviteOut');
-    out.textContent = 'Creating...';
-    sb.rpc('create_invite', { p_role: 'viewer' }).then(function (code) {
-      out.innerHTML = '';
-      var c = document.createElement('div');
-      c.className = 'code';
-      c.textContent = code;
-      out.appendChild(c);
-      out.appendChild(document.createTextNode('One use, valid for 7 days. The person opens this page, creates an account and enters the code.'));
-    }).catch(function (e) { out.textContent = e.message; });
-  };
-
-  // ---- Cameras: settings live here, the camera phone fetches them every few seconds ----
-  var camParts = {};      // camera id -> elements that the live refresh updates
-  var camIds = '';
-
-  function add(parent, tag, text, cls) {
-    var e = document.createElement(tag);
-    if (text) { e.textContent = text; }
-    if (cls) { e.className = cls; }
-    parent.appendChild(e);
-    return e;
-  }
-
-  function save(id, patch) { sb.updateCamera(id, patch).catch(showErr); }
-
-  function slider(parent, label, min, max, value, fmt, onSave) {
-    var wrap = add(parent, 'div', '', 'setting');
-    var lab = add(wrap, 'label');
-    var inp = document.createElement('input');
-    inp.type = 'range'; inp.min = min; inp.max = max; inp.value = value;
-    function show() { lab.textContent = label + ': ' + fmt(Number(inp.value)); }
-    inp.oninput = show;
-    inp.onchange = function () { onSave(Number(inp.value)); };
-    wrap.appendChild(inp);
-    show();
-  }
-
-  function pct(c) { return c.sensitivity / 20; }
-
-  function updateLive(c) {
-    var p = camParts[c.id];
-    if (!p) { return; }
-    var online = c.pinged_at && (Date.now() - new Date(c.pinged_at).getTime()) < 30000;
-    p.status.textContent = online ? 'online' : (c.pinged_at ? 'offline, last seen ' + new Date(c.pinged_at).toLocaleString() : 'never connected');
-    p.status.className = 'status ' + (online ? 'on' : 'off');
-    p.arm.textContent = c.armed ? 'Armed (tap to disarm)' : 'Disarmed (tap to arm)';
-    p.arm.className = c.armed ? '' : 'grey';
-    var level = online && c.motion_now != null ? Number(c.motion_now) : 0;
-    p.meter.style.width = Math.min(100, level / (pct(c) * 3) * 100) + '%';
-    p.snap.textContent = c.snapshot_requested ? 'Photo requested...' : 'Take photo now';
-    p.snap.disabled = !!c.snapshot_requested;
-  }
-
-  // ---- Near-live view: the camera sends a small frame about once a second while this is open ----
-  var lives = {};         // camera id -> running live view
-  var LIVE_MAX_MS = 5 * 60 * 1000;
-
+  // ---------- near-live view: the camera sends a small frame about once a second while this runs ----------
   function stopLive(id, msg) {
     var l = lives[id];
     if (!l) { return; }
     clearInterval(l.keep);
     clearTimeout(l.timer);
     delete lives[id];
+    var p = cards[id];
+    if (p) { p.img.onload = null; p.img.onerror = null; p.shownPath = '__reset__'; }
     save(id, { live_until: null });
-    l.box.className = 'livebox hidden';
-    l.btn.textContent = 'Live view (testing)';
-    if (msg) { showErr(new Error(msg)); }
+    if (camById[id]) { updateCard(camById[id]); }
+    if (msg) { $('err').textContent = msg; }
   }
 
-  function startLive(c, btn, box, img, note) {
-    var path = 'live/' + c.id + '.jpg';
-    var l = { btn: btn, box: box, url: null, timer: null, keep: null, stopAt: Date.now() + LIVE_MAX_MS };
-    lives[c.id] = l;
-    box.className = 'livebox';
-    btn.textContent = 'Stop live view';
-    note.textContent = 'Waiting for the camera (it checks in every few seconds)...';
-    sb.deleteObject(path).catch(function () {});      // drop a stale frame from an earlier session
+  function startLive(id) {
+    var p = cards[id];
+    var path = 'live/' + id + '.jpg';
+    var l = { url: null, timer: null, keep: null, stopAt: Date.now() + LIVE_MAX_MS };
+    lives[id] = l;
+    $('err').textContent = '';
+    p.img.className = 'hidden';
+    p.empty.className = 'empty';
+    p.empty.textContent = 'Waiting for the camera (it checks in every few seconds)...';
+    updateCard(camById[id]);
+    sb.deleteObject(path).catch(function () {});       // drop a stale frame from an earlier session
 
-    function keepAlive() { save(c.id, { live_until: new Date(Date.now() + 45000).toISOString() }); }
+    function keepAlive() { save(id, { live_until: new Date(Date.now() + 45000).toISOString() }); }
     keepAlive();
     l.keep = setInterval(keepAlive, 20000);
 
     function tick() {
-      if (lives[c.id] !== l) { return; }
-      if (Date.now() > l.stopAt) { stopLive(c.id, 'Live view stopped after 5 minutes.'); return; }
+      if (lives[id] !== l) { return; }
+      if (Date.now() > l.stopAt) { stopLive(id, 'Live view stopped after 5 minutes.'); return; }
       if (!l.url) {
         sb.signPaths([path]).then(function (map) {
           l.url = map[path] || null;
@@ -227,114 +341,176 @@
         }).catch(function () { l.timer = setTimeout(tick, 2000); });
         return;
       }
-      img.onload = function () { note.textContent = 'Live (about one frame per second)'; l.timer = setTimeout(tick, 800); };
-      img.onerror = function () { l.url = null; l.timer = setTimeout(tick, 1500); };
-      img.src = l.url + (l.url.indexOf('?') < 0 ? '?' : '&') + 't=' + Date.now();
+      p.img.onload = function () {
+        p.img.className = '';
+        p.empty.className = 'hidden';
+        l.timer = setTimeout(tick, LIVE_FRAME_MS);
+      };
+      p.img.onerror = function () { l.url = null; l.timer = setTimeout(tick, 1500); };
+      p.img.src = l.url + (l.url.indexOf('?') < 0 ? '?' : '&') + 't=' + Date.now();
     }
     tick();
   }
 
-  function renderCameras(cams) {
-    var box = $('camList');
-    box.innerHTML = '';
-    camParts = {};
-    camIds = cams.map(function (c) { return c.id; }).join(',');
-    if (!cams.length) { box.textContent = 'No cameras yet.'; return; }
-    cams.forEach(function (c) {
-      var card = add(box, 'div', '', 'cam');
-      var head = add(card, 'div', '', 'camhead');
-      add(head, 'b', c.name);
-      var status = add(head, 'span', '', 'status');
-
-      var arm = add(card, 'button');
-      arm.onclick = function () {
-        var next = arm.textContent.indexOf('Armed') !== 0;
-        save(c.id, { armed: next });
-        arm.textContent = next ? 'Armed (tap to disarm)' : 'Disarmed (tap to arm)';
-        arm.className = next ? '' : 'grey';
-      };
-
-      slider(card, 'Sensitivity', 1, 100, c.sensitivity,
-        function (v) { return 'alert at ' + (v / 20).toFixed(2) + '% of the image changing (lower = more sensitive)'; },
-        function (v) { c.sensitivity = v; save(c.id, { sensitivity: v }); });
-      slider(card, 'Pause between alerts', 5, 600, c.cooldown_s,
-        function (v) { return v + ' s'; },
-        function (v) { save(c.id, { cooldown_s: v }); });
-      slider(card, 'Scene adapts after', 10, 300, c.adapt_s,
-        function (v) { return 'about ' + v + ' s (a moved car or object stops counting as motion)'; },
-        function (v) { save(c.id, { adapt_s: v }); });
-
-      add(card, 'label', 'Live motion level (white mark = alert threshold, updates every few seconds)');
-      var bar = add(card, 'div', '', 'bar2');
-      var meter = add(bar, 'div', '', 'meter');
-      add(bar, 'div', '', 'mark');
-
-      var topicWrap = add(card, 'div', '', 'setting');
-      add(topicWrap, 'label', 'Alert topic for the ntfy app (text-only push, optional)');
-      var topic = document.createElement('input');
-      topic.type = 'text'; topic.value = c.ntfy_topic || ''; topic.placeholder = 'e.g. garage-k3x9q2';
-      topic.style.cssText = 'width:100%;box-sizing:border-box;padding:8px;font-size:15px';
-      topic.onchange = function () {
-        var v = topic.value.trim();
-        sb.updateCamera(c.id, { ntfy_topic: v || null }).catch(function (e) { showErr(new Error('Topic: 6-64 letters, digits, - or _')); });
-      };
-      topicWrap.appendChild(topic);
-      var gen = add(topicWrap, 'button', 'Generate random topic', 'grey');
-      gen.onclick = function () {
-        var chars = 'abcdefghijkmnpqrstuvwxyz23456789', s = 'garage-';
-        for (var i = 0; i < 10; i++) { s += chars.charAt(Math.floor(Math.random() * chars.length)); }
-        topic.value = s;
-        topic.onchange();
-      };
-
-      var snap = add(card, 'button', 'Take photo now', 'grey');
-      snap.onclick = function () { save(c.id, { snapshot_requested: true }); snap.textContent = 'Photo requested...'; snap.disabled = true; };
-      var liveBtn = add(card, 'button', 'Live view (testing)', 'grey');
-      var liveBox = add(card, 'div', '', 'livebox hidden');
-      var liveImg = document.createElement('img');
-      liveImg.alt = 'live view';
-      liveImg.style.cssText = 'width:100%;display:block;background:#000;min-height:120px;margin-top:8px';
-      liveBox.appendChild(liveImg);
-      var liveNote = add(liveBox, 'div', '', 'hint');
-      liveBtn.onclick = function () {
-        if (lives[c.id]) { stopLive(c.id); } else { startLive(c, liveBtn, liveBox, liveImg, liveNote); }
-      };
-      var del = add(card, 'button', 'Remove camera', 'grey');
-      del.onclick = function () {
-        if (!confirm('Remove camera "' + c.name + '"? Its code stops working and its photos are deleted.')) { return; }
-        sb.deleteCamera(c.id).then(function () { loadCameras(); load(); }).catch(showErr);
-      };
-
-      camParts[c.id] = { status: status, arm: arm, meter: meter, snap: snap };
-      updateLive(c);
-    });
+  // ---------- camera settings modal ----------
+  function slider(parent, label, min, max, value, fmt, onSave) {
+    var wrap = h('div', 'setting');
+    var lab = h('label');
+    var inp = document.createElement('input');
+    inp.type = 'range'; inp.min = min; inp.max = max; inp.value = value;
+    function refresh() { lab.textContent = label + ': ' + fmt(Number(inp.value)); }
+    inp.oninput = refresh;
+    inp.onchange = function () { onSave(Number(inp.value)); };
+    wrap.appendChild(lab); wrap.appendChild(inp);
+    parent.appendChild(wrap);
+    refresh();
   }
 
-  function loadCameras() {
-    return sb.listCameras().then(function (cams) {
-      var ids = cams.map(function (c) { return c.id; }).join(',');
-      if (ids !== camIds) {
-        Object.keys(lives).forEach(function (id) { stopLive(id); });
-        renderCameras(cams);
-      } else { cams.forEach(updateLive); }
-    }).catch(showErr);
-  }
-  setInterval(function () { if (sb.loggedIn() && $('app').className === '') { loadCameras(); } }, 5000);
+  function openSettings(id) {
+    var c = camById[id];
+    var body = h('div');
 
-  $('camBtn').onclick = function () {
-    var out = $('camOut');
-    out.textContent = 'Creating...';
-    sb.rpc('create_camera', { p_name: $('camName').value }).then(function (code) {
-      out.innerHTML = '';
-      var c = document.createElement('div');
-      c.className = 'code';
-      c.textContent = code;
-      out.appendChild(c);
-      out.appendChild(document.createTextNode('Enter this code on the camera phone. It is shown only once, so copy it now.'));
-      $('camName').value = '';
-      loadCameras();
-    }).catch(function (e) { out.textContent = e.message; });
+    var arm = h('button');
+    arm.onclick = function () { save(id, { armed: !camById[id].armed }); update(camById[id]); };
+    body.appendChild(arm);
+
+    slider(body, 'Sensitivity', 1, 100, c.sensitivity,
+      function (v) { return 'alert at ' + (v / 20).toFixed(2) + '% of the image changing (lower = more sensitive)'; },
+      function (v) { save(id, { sensitivity: v }); });
+    slider(body, 'Pause between alerts', 5, 600, c.cooldown_s,
+      function (v) { return v + ' s'; },
+      function (v) { save(id, { cooldown_s: v }); });
+    slider(body, 'Scene adapts after', 10, 300, c.adapt_s,
+      function (v) { return 'about ' + v + ' s (a moved car or object stops counting as motion)'; },
+      function (v) { save(id, { adapt_s: v }); });
+
+    var lw = h('div', 'setting');
+    lw.appendChild(h('label', '', 'Change since the last frame (white mark = alert threshold, updates every few seconds)'));
+    var bar = h('div', 'bar2'); var meter = h('div', 'meter');
+    bar.appendChild(meter); bar.appendChild(h('div', 'mark'));
+    lw.appendChild(bar);
+    body.appendChild(lw);
+
+    var tw = h('div', 'setting');
+    tw.appendChild(h('label', '', 'Alert topic for the ntfy app (text-only push, optional)'));
+    var topic = document.createElement('input');
+    topic.type = 'text'; topic.value = c.ntfy_topic || ''; topic.placeholder = 'e.g. garage-k3x9q2';
+    topic.onchange = function () {
+      sb.updateCamera(id, { ntfy_topic: topic.value.trim() || null })
+        .catch(function () { showErr(new Error('Topic: 6-64 letters, digits, - or _')); });
+    };
+    tw.appendChild(topic);
+    var gen = h('button', 'grey', 'Generate random topic');
+    gen.onclick = function () {
+      var chars = 'abcdefghijkmnpqrstuvwxyz23456789', s = 'garage-';
+      for (var i = 0; i < 10; i++) { s += chars.charAt(Math.floor(Math.random() * chars.length)); }
+      topic.value = s;
+      topic.onchange();
+    };
+    tw.appendChild(gen);
+    body.appendChild(tw);
+
+    var row = h('div', 'row');
+    var snap = h('button', 'grey', 'Take photo now');
+    snap.onclick = function () { save(id, { snapshot_requested: true }); update(camById[id]); };
+    var rename = h('button', 'grey', 'Rename');
+    rename.onclick = function () {
+      var n = prompt('Camera name', camById[id].name);
+      if (n && n.trim()) { save(id, { name: n.trim().slice(0, 40) }); updateCard(camById[id]); }
+    };
+    var del = h('button', 'danger', 'Remove camera');
+    del.onclick = function () {
+      if (!confirm('Remove camera "' + camById[id].name + '"? Its code stops working and its photos are deleted.')) { return; }
+      sb.deleteCamera(id).then(function () { closeModal(); loadCams(); loadEvents(); }).catch(showErr);
+    };
+    row.appendChild(snap); row.appendChild(rename); row.appendChild(del);
+    body.appendChild(row);
+
+    function update(cam) {
+      if (!cam) { return; }
+      arm.textContent = cam.armed ? 'Armed - tap to disarm' : 'Not armed - tap to arm';
+      arm.className = cam.armed ? '' : 'grey';
+      var level = isOnline(cam) && cam.motion_now != null ? Number(cam.motion_now) : 0;
+      meter.style.width = Math.min(100, level / ((cam.sensitivity / 20) * 3) * 100) + '%';
+      snap.textContent = cam.snapshot_requested ? 'Photo requested...' : 'Take photo now';
+      snap.disabled = !!cam.snapshot_requested;
+    }
+    update(c);
+    openModal(c.name + ' - settings', body, { id: id, update: update });
+  }
+
+  // ---------- add camera / invite ----------
+  function codeBlock(body, code, note) {
+    body.appendChild(h('div', 'code', code));
+    body.appendChild(h('div', 'hint', note));
+  }
+
+  $('addCamBtn').onclick = function () {
+    var body = h('div');
+    body.appendChild(h('div', 'hint', 'Give the camera a name. You get a secret code to enter once on the camera phone.'));
+    var name = document.createElement('input');
+    name.type = 'text'; name.placeholder = 'Name, e.g. Garage';
+    var go = h('button', '', 'Create camera');
+    var out = h('div');
+    go.onclick = function () {
+      go.disabled = true;
+      sb.rpc('create_camera', { p_name: name.value }).then(function (code) {
+        body.innerHTML = '';
+        codeBlock(body, code, 'Enter this code on the camera phone at .../demo/camera.html. It is shown only once, so copy it now.');
+        loadCams();
+      }).catch(function (e) { go.disabled = false; out.textContent = e.message; });
+    };
+    body.appendChild(name); body.appendChild(go); body.appendChild(out);
+    openModal('Add a camera', body);
   };
+
+  $('inviteBtn').onclick = function () {
+    var body = h('div');
+    body.appendChild(h('div', 'hint', 'The person will be able to see all cameras and photos. The code works once and is valid for 7 days.'));
+    var go = h('button', '', 'Create invite code');
+    var out = h('div');
+    go.onclick = function () {
+      go.disabled = true;
+      sb.rpc('create_invite', { p_role: 'viewer' }).then(function (code) {
+        body.innerHTML = '';
+        codeBlock(body, code, 'They open this page, create an account and enter the code.');
+      }).catch(function (e) { go.disabled = false; out.textContent = e.message; });
+    };
+    body.appendChild(go); body.appendChild(out);
+    openModal('Invite someone', body);
+  };
+
+  // ---------- login / start ----------
+  var polling = null;
+
+  function ready() {
+    $('who').textContent = sb.email();
+    show(true);
+    loadCams().then(loadEvents);
+    clearInterval(polling);
+    var n = 0;
+    polling = setInterval(function () {
+      if (document.hidden) { return; }
+      n++;
+      loadCams();
+      if (n % 4 === 0) { loadEvents(); }       // photos every ~20 s, camera status every 5 s
+    }, 5000);
+  }
+
+  var auth = GarageAuth.init({ sb: sb, el: $('authBox'), role: 'viewer', onReady: ready });
+
+  $('logoutBtn').onclick = function () {
+    Object.keys(lives).forEach(function (id) { stopLive(id); });
+    sb.logout();
+    clearInterval(polling);
+    closeModal();
+    show(false);
+    auth.show();
+  };
+
+  window.addEventListener('beforeunload', function () {
+    Object.keys(lives).forEach(function (id) { save(id, { live_until: null }); });
+  });
 
   show(false);
   auth.start();

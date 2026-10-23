@@ -125,7 +125,7 @@ window.makeSb = function (storeKey) {
       return api('/rest/v1/cameras?id=eq.' + id, { method: 'DELETE' });
     },
     listEvents: function (limit) {
-      return api('/rest/v1/events?select=id,created_at,kind,photo_path,motion_pct&order=created_at.desc&limit=' + limit)
+      return api('/rest/v1/events?select=id,camera_id,created_at,kind,photo_path,motion_pct&order=created_at.desc&limit=' + limit)
         .then(function (r) { return r.json(); });
     },
     signPaths: function (paths) {
