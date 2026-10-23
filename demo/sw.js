@@ -9,6 +9,8 @@ self.addEventListener('push', function (e) {
     body: d.body || '',
     tag: d.tag || 'garage',
     renotify: true,
+    silent: false,
+    vibrate: [200, 100, 200],
     data: { url: d.url || './viewer.html' }
   }));
 });

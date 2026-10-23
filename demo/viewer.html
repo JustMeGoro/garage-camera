@@ -96,7 +96,7 @@
     <div id="cams"></div>
     <div class="sechead"><h2>Recent activity</h2><button id="delAll" class="grey small">Delete all photos</button></div>
     <div id="grid" class="grid"></div>
-    <div class="hint" style="margin-top:24px">Version 20261023k</div>
+    <div class="hint" style="margin-top:24px">Version 20261023l</div>
   </main>
 </div>
 
@@ -107,9 +107,9 @@
   </div>
 </div>
 
-<script src="config.js?v=20261023k"></script>
-<script src="sb.js?v=20261023k"></script>
-<script src="auth.js?v=20261023k"></script>
+<script src="config.js?v=20261023l"></script>
+<script src="sb.js?v=20261023l"></script>
+<script src="auth.js?v=20261023l"></script>
 <script>
 (function () {
   var sb = makeSb('garage_viewer_session');
@@ -682,7 +682,42 @@
     row.appendChild(test);
     body.appendChild(row);
     body.appendChild(out);
+
+    // Local check: shows a notification without the server, to tell "this device cannot display notifications"
+    // apart from "the push did not arrive".
+    var local = h('button', 'grey', 'Show a notification on this device (local check)');
+    local.onclick = function () {
+      pushState().then(function (s) {
+        return s.reg.showNotification('Local check', { body: 'If you can read this, this device can show notifications.', tag: 'local-check' });
+      }).then(function () {
+        out.textContent = 'Requested. Look for the notification now. If nothing appears, this device or browser blocks notifications from this site: check the system notification settings and Chrome site settings.';
+      }).catch(function (e) { out.textContent = 'Could not show a notification: ' + e.message; });
+    };
+    var row2 = h('div', 'row');
+    row2.appendChild(local);
+    body.appendChild(row2);
+
+    var devs = h('div', 'hint');
+    body.appendChild(devs);
     body.appendChild(h('div', 'hint', 'Alerts go to every device where you enabled this. On an iPhone, first add this page to the Home Screen (Share, Add to Home Screen) and open it from there.'));
+
+    function loadDevices(currentEndpoint) {
+      sb.listSubscriptions().then(function (rows) {
+        devs.innerHTML = '';
+        devs.appendChild(document.createTextNode(rows.length ? 'Registered devices:' : 'No device is registered yet.'));
+        rows.forEach(function (r) {
+          var line = h('div', '', '');
+          line.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin:6px 0;gap:8px';
+          var host = '';
+          try { host = new URL(r.endpoint).host; } catch (e) {}
+          line.appendChild(h('span', '', (r.label || 'device') + ', added ' + when(r.created_at) + (host ? ' (' + host + ')' : '') + (currentEndpoint && r.endpoint === currentEndpoint ? ' - this device' : '')));
+          var rm = h('button', 'grey small', 'Remove');
+          rm.onclick = function () { sb.deleteSubscription(r.endpoint).then(function () { loadDevices(currentEndpoint); refreshBell(); }).catch(showErr); };
+          line.appendChild(rm);
+          devs.appendChild(line);
+        });
+      }).catch(function () {});
+    }
 
     function show() {
       if (!pushSupported()) {
@@ -696,6 +731,7 @@
         info.textContent = on ? 'Notifications are ON for this device.' : (Notification.permission === 'denied' ? 'Notifications are blocked for this site in the browser settings.' : 'Notifications are OFF for this device.');
         toggle.textContent = on ? 'Turn off on this device' : 'Turn on for this device';
         toggle.className = on ? 'grey' : '';
+        loadDevices(s.sub ? s.sub.endpoint : null);
         refreshBell();
       }).catch(function (e) { info.textContent = 'Could not check notifications: ' + e.message; });
     }

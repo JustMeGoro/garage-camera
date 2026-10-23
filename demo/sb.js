@@ -125,6 +125,10 @@ window.makeSb = function (storeKey) {
         body: JSON.stringify(row)
       });
     },
+    listSubscriptions: function () {
+      return api('/rest/v1/push_subscriptions?select=id,label,created_at,endpoint&order=created_at.asc')
+        .then(function (r) { return r.json(); });
+    },
     deleteSubscription: function (endpoint) {
       return api('/rest/v1/push_subscriptions?endpoint=eq.' + encodeURIComponent(endpoint), { method: 'DELETE' });
     },
