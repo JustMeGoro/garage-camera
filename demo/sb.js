@@ -108,8 +108,15 @@ window.makeSb = function (storeKey) {
       });
     },
     listCameras: function () {
-      return api('/rest/v1/cameras?select=id,name,created_at,last_seen&order=created_at.asc')
+      return api('/rest/v1/cameras?select=id,name,created_at,last_seen,pinged_at,motion_now,sensitivity,cooldown_s,adapt_s,armed,snapshot_requested,ntfy_topic&order=created_at.asc')
         .then(function (r) { return r.json(); });
+    },
+    updateCamera: function (id, patch) {
+      return api('/rest/v1/cameras?id=eq.' + id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify(patch)
+      });
     },
     deleteCamera: function (id) {
       return api('/rest/v1/cameras?id=eq.' + id, { method: 'DELETE' });

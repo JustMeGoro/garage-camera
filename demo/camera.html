@@ -9,22 +9,16 @@
   main { max-width: 640px; margin: 0 auto; padding: 12px; }
   h1 { font-size: 20px; margin: 4px 0 10px; }
   .view { position: relative; background: #000; }
-  video, canvas.snap { width: 100%; display: block; }
+  video { width: 100%; display: block; }
   .badge { position: absolute; top: 8px; left: 8px; padding: 4px 8px; border-radius: 4px; background: #555; font-size: 14px; }
   .badge.armed { background: #c0392b; }
   .badge.motion { background: #e67e22; }
   .row { margin: 10px 0; }
-  label { display: block; font-size: 13px; color: #aaa; margin-bottom: 2px; }
-  input[type=text] { width: 100%; box-sizing: border-box; padding: 8px; font-size: 16px; }
-  input[type=range] { width: 100%; }
+  input[type=text] { width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; margin-bottom: 8px; }
   button { padding: 12px 16px; font-size: 16px; border: 0; border-radius: 4px; background: #2d7ff9; color: #fff; margin-right: 6px; }
   button.off { background: #555; }
-  #log { list-style: none; padding: 0; margin: 0; }
-  #log li { display: flex; align-items: center; border-top: 1px solid #333; padding: 6px 0; font-size: 14px; }
-  #log img { width: 96px; margin-right: 10px; }
-  .hint { font-size: 12px; color: #888; }
-  input[type=email], input[type=password] { width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; margin-bottom: 8px; }
   .err { color: #e74c3c; font-size: 14px; min-height: 18px; }
+  .hint { font-size: 12px; color: #888; margin: 6px 0; }
   .hidden { display: none; }
 </style>
 </head>
@@ -32,56 +26,28 @@
 <main>
   <h1>Garage camera</h1>
 
-  <section id="loginBox" class="hidden">
-    <div class="hint">Enter the camera code. Create one on the viewer page under "Cameras". The code only lets this phone upload photos, never view them.</div>
+  <section id="codeBox" class="hidden">
+    <div class="hint">Enter the camera code. Create one on the viewer page under "Cameras". The code only lets this phone upload photos, never view them. All settings are changed in the viewer.</div>
     <input id="codeIn" type="text" placeholder="Camera code (case-sensitive)" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off">
     <button id="codeSave">Save code</button>
     <div class="err" id="codeErr"></div>
   </section>
 
-  <div id="camSection" class="hidden">
-  <div class="view">
-    <video id="video" autoplay muted playsinline></video>
-    <div id="badge" class="badge">Idle</div>
-  </div>
+  <section id="camSection" class="hidden">
+    <div class="view">
+      <video id="video" autoplay muted playsinline></video>
+      <div id="badge" class="badge">Starting</div>
+    </div>
+    <div class="row">
+      <button id="start">Start camera</button>
+      <button id="forget" class="off">Forget camera code</button>
+    </div>
+    <div class="hint" id="status"></div>
+    <div class="hint">Settings (sensitivity, pause, arming, alerts) are set in the viewer. Keep this page open and the phone plugged in.</div>
+  </section>
 
-  <div class="row">
-    <button id="start">Start camera</button>
-    <button id="arm" class="off">Arm</button>
-    <button id="test" class="off">Send test</button>
-  </div>
-
-  <div class="row">
-    <label>Alert topic (optional, text-only push through the ntfy app, no photos)</label>
-    <input type="text" id="topic">
-    <div class="hint">Subscribe to this topic in the ntfy app. The alert says "motion" and links to the viewer page, where you log in to see the photo.</div>
-  </div>
-
-  <div class="row">
-    <label>Sensitivity: <span id="sensVal"></span></label>
-    <input type="range" id="sens" min="1" max="100" value="6">
-  </div>
-
-  <div class="row">
-    <label>Pause between alerts: <span id="coolVal"></span> s</label>
-    <input type="range" id="cool" min="5" max="120" value="30">
-  </div>
-
-  <div class="row">
-    <label>Scene adapts after about <span id="adaptVal"></span> s (a moved car or object stops counting as motion)</label>
-    <input type="range" id="adapt" min="10" max="300" value="60">
-  </div>
-
-  <div class="row">
-    <label>Live motion level (changed pixels)</label>
-    <div style="background:#333;height:10px;position:relative"><div id="meter" style="background:#e67e22;height:10px;width:0"></div><div style="position:absolute;left:33.3%;top:0;width:2px;height:10px;background:#fff"></div></div>
-  </div>
-
-  <ul id="log"></ul>
   <canvas id="work" width="160" height="120" style="display:none"></canvas>
   <canvas id="full" style="display:none"></canvas>
-  <button id="logoutBtn" class="off">Forget camera code</button>
-  </div>
 </main>
 
 <script src="config.js"></script>
@@ -89,59 +55,46 @@
 (function () {
   var cfg = window.GARAGE_CONFIG;
   var CODE_KEY = 'garage_camera_code';
+  var SETTINGS_KEY = 'garage_camera_settings';
+  var SYNC_MS = 8000;
+
   var video = document.getElementById('video');
   var badge = document.getElementById('badge');
+  var statusEl = document.getElementById('status');
   var work = document.getElementById('work');
   var wctx = work.getContext('2d');
   var full = document.getElementById('full');
-  var log = document.getElementById('log');
-  var topicInput = document.getElementById('topic');
-  var sens = document.getElementById('sens');
-  var cool = document.getElementById('cool');
-  var adapt = document.getElementById('adapt');
-  var armBtn = document.getElementById('arm');
-  var testBtn = document.getElementById('test');
 
-  var armed = false;
-  var bg = null;            // reference image of the garage, adapts slowly
+  // Defaults until the first sync; the last known settings are kept so a restart without internet still works.
+  var settings = { sensitivity: 6, cooldown_s: 30, adapt_s: 60, armed: false };
+  var bg = null;               // reference image of the garage, adapts slowly
   var cur = new Uint8Array(work.width * work.height);
+  var TOTAL = work.width * work.height;
   var lastTick = Date.now();
   var lastAlert = 0;
-  var PIXEL_DIFF = 18;      // brightness change that counts as a changed pixel
-  var hits = 0;             // consecutive checks over the threshold (filters single-frame noise)
-  function sensPct() { return Number(sens.value) / 20; }   // slider 1..100 -> 0.05%..5%
-  var TOTAL = work.width * work.height;
+  var hits = 0;                // consecutive checks over the threshold (filters single-frame noise)
+  var maxLevel = 0;            // highest motion level since the last sync (shown live in the viewer)
+  var uploading = false;
+  var started = false;
+  var PIXEL_DIFF = 18;         // brightness change that counts as a changed pixel
 
   function store(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
   function load(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+  function drop(key) { try { localStorage.removeItem(key); } catch (e) {} }
+  function el(id) { return document.getElementById(id); }
+  function sensPct() { return Number(settings.sensitivity) / 20; }   // slider 1..100 -> 0.05%..5%
+  function getCode() { return load(CODE_KEY); }
 
-  function randomTopic() {
-    var s = 'garage-';
-    var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    for (var i = 0; i < 10; i++) { s += chars.charAt(Math.floor(Math.random() * chars.length)); }
-    return s;
-  }
-
-  topicInput.value = load('topic') || randomTopic();
-  store('topic', topicInput.value);
-  topicInput.onchange = function () { store('topic', topicInput.value.trim()); };
-  if (load('sens2')) { sens.value = load('sens2'); }
-  if (load('cool')) { cool.value = load('cool'); }
-  if (load('adapt')) { adapt.value = load('adapt'); }
-
-  function showSliders() {
-    document.getElementById('adaptVal').textContent = adapt.value;
-    document.getElementById('sensVal').textContent = 'alert at ' + sensPct().toFixed(2) + '% of the image changing (lower = more sensitive)';
-    document.getElementById('coolVal').textContent = cool.value;
-  }
-  sens.oninput = function () { store('sens2', sens.value); showSliders(); };
-  cool.oninput = function () { store('cool', cool.value); showSliders(); };
-  adapt.oninput = function () { store('adapt', adapt.value); showSliders(); };
-  showSliders();
+  try { var saved = JSON.parse(load(SETTINGS_KEY)); if (saved) { settings = saved; } } catch (e) {}
 
   function setBadge(text, cls) {
     badge.textContent = text;
     badge.className = 'badge' + (cls ? ' ' + cls : '');
+  }
+
+  function showArmState() {
+    if (!started) { return; }
+    setBadge(settings.armed ? 'Armed' : 'Disarmed', settings.armed ? 'armed' : '');
   }
 
   function getStream() {
@@ -154,24 +107,22 @@
     return new Promise(function (ok, fail) { legacy.call(navigator, constraints, ok, fail); });
   }
 
-  document.getElementById('start').onclick = function () {
+  function startCamera() {
+    if (started) { return; }
     getStream().then(function (stream) {
       video.srcObject = stream;
       video.play();
-      setBadge('Camera on');
+      started = true;
+      el('start').className = 'hidden';
+      showArmState();
       setInterval(tick, 250);
+      sync();
+      setInterval(sync, SYNC_MS);
     }).catch(function (err) {
-      alert('Camera error: ' + err.message);
+      setBadge('Camera blocked');
+      statusEl.textContent = 'Camera error: ' + err.message + '. Tap Start camera and allow access.';
     });
-  };
-
-  armBtn.onclick = function () {
-    armed = !armed;
-    bg = null;
-    armBtn.textContent = armed ? 'Disarm' : 'Arm';
-    armBtn.className = armed ? '' : 'off';
-    setBadge(armed ? 'Armed' : 'Camera on', armed ? 'armed' : '');
-  };
+  }
 
   function tick() {
     if (!video.videoWidth) { return; }
@@ -180,8 +131,8 @@
     var now = Date.now();
     var dt = (now - lastTick) / 1000;
     lastTick = now;
-    // How fast the reference absorbs the current scene (exponential average over adapt seconds)
-    var alpha = 1 - Math.exp(-dt / Number(adapt.value));
+    // How fast the reference absorbs the current scene (exponential average over adapt_s seconds)
+    var alpha = 1 - Math.exp(-dt / Number(settings.adapt_s));
     var changed = 0;
     for (var i = 0, p = 0; i < data.length; i += 4, p++) {
       var g = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
@@ -193,16 +144,15 @@
     }
     if (!bg) { bg = new Float32Array(cur); }
     var pct = changed * 100 / TOTAL;
-    // Meter: the orange mark at 1/3 is the alert threshold
-    document.getElementById('meter').style.width = Math.min(100, pct / (sensPct() * 3) * 100) + '%';
-    if (!armed) { return; }
+    if (pct > maxLevel) { maxLevel = pct; }
+    if (!settings.armed) { hits = 0; return; }
     hits = pct >= sensPct() ? hits + 1 : 0;
-    if (hits >= 2 && now - lastAlert > Number(cool.value) * 1000) {
+    if (hits >= 2 && now - lastAlert > Number(settings.cooldown_s) * 1000) {
       hits = 0;
       lastAlert = now;
       setBadge('MOTION', 'motion');
-      setTimeout(function () { if (armed) { setBadge('Armed', 'armed'); } }, 3000);
-      capture(function (blob, thumbUrl) { alertMotion(blob, thumbUrl, 'motion', pct); });
+      setTimeout(showArmState, 3000);
+      capture(function (blob) { sendPhoto(blob, 'motion', pct); });
     }
   }
 
@@ -212,100 +162,95 @@
     full.width = Math.round(video.videoWidth * scale);
     full.height = Math.round(video.videoHeight * scale);
     full.getContext('2d').drawImage(video, 0, 0, full.width, full.height);
-    var url = full.toDataURL('image/jpeg', 0.6);
     if (full.toBlob) {
-      full.toBlob(function (b) { done(b, url); }, 'image/jpeg', 0.6);
+      full.toBlob(done, 'image/jpeg', 0.6);
     } else {
-      var bin = atob(url.split(',')[1]);
+      var bin = atob(full.toDataURL('image/jpeg', 0.6).split(',')[1]);
       var arr = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) { arr[i] = bin.charCodeAt(i); }
-      done(new Blob([arr], { type: 'image/jpeg' }), url);
+      done(new Blob([arr], { type: 'image/jpeg' }));
     }
   }
 
-  function addLog(thumbUrl, text) {
-    var li = document.createElement('li');
-    var img = document.createElement('img');
-    img.src = thumbUrl;
-    var span = document.createElement('span');
-    span.textContent = new Date().toLocaleTimeString() + ' ' + text;
-    li.appendChild(img);
-    li.appendChild(span);
-    log.insertBefore(li, log.firstChild);
+  function codeRejected() {
+    drop(CODE_KEY);
+    showCodeBox('The camera code was rejected. Enter a new one.');
   }
 
-  function getCode() { return load(CODE_KEY); }
+  function fn(query, init) {
+    init.headers = init.headers || {};
+    init.headers['x-camera-secret'] = getCode() || '';
+    init.method = 'POST';
+    return fetch(cfg.url + '/functions/v1/camera-upload' + query, init);
+  }
 
-  // Send the photo to the camera-upload function, which checks the code and stores it privately.
-  // Then send a text-only push.
-  function alertMotion(blob, thumbUrl, kind, pct) {
-    var label = kind === 'test' ? 'Test alert' : 'Motion in the garage';
-    addLog(thumbUrl, label);
-    var entry = log.firstChild.lastChild;
+  function sendPhoto(blob, kind, pct) {
+    uploading = true;
     var query = '?kind=' + kind + (pct ? '&pct=' + (Math.round(pct * 100) / 100) : '');
-    fetch(cfg.url + '/functions/v1/camera-upload' + query, {
-      method: 'POST',
-      headers: { 'x-camera-secret': getCode() || '', 'Content-Type': 'image/jpeg' },
-      body: blob
-    }).then(function (r) {
-      if (r.status === 401) {
-        entry.textContent += ' - code rejected';
-        try { localStorage.removeItem(CODE_KEY); } catch (e) {}
-        showLogin();
-        return;
-      }
-      if (!r.ok) { throw new Error('HTTP ' + r.status); }
-      entry.textContent += ' - uploaded';
-      sendPush(label);
+    fn(query, { headers: { 'Content-Type': 'image/jpeg' }, body: blob }).then(function (r) {
+      if (r.status === 401) { codeRejected(); return; }
+      statusEl.textContent = (r.ok ? 'Photo uploaded ' : 'Upload failed (' + r.status + ') ') + new Date().toLocaleTimeString();
     }).catch(function (e) {
-      entry.textContent += ' - upload failed: ' + e.message;
-    });
+      statusEl.textContent = 'Upload failed: ' + e.message;
+    }).then(function () { uploading = false; });
   }
 
-  function sendPush(label) {
-    var topic = topicInput.value.trim();
-    if (!topic) { return; }
-    var viewer = location.href.replace(/camera\.html.*$/, 'viewer.html');
-    fetch('https://ntfy.sh/' + encodeURIComponent(topic), {
-      method: 'POST',
-      headers: { 'Title': label, 'Tags': 'warning,camera', 'Priority': '4', 'Click': viewer },
-      body: new Date().toLocaleTimeString() + ' - open the viewer to see the photo'
-    }).catch(function () {});
+  // Heartbeat: reports the live motion level and fetches the settings made in the viewer.
+  function sync() {
+    var level = maxLevel;
+    maxLevel = 0;
+    fn('?action=sync', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level: level }) })
+      .then(function (r) {
+        if (r.status === 401) { codeRejected(); return null; }
+        if (!r.ok) { throw new Error('HTTP ' + r.status); }
+        return r.json();
+      }).then(function (s) {
+        if (!s) { return; }
+        if (s.armed !== settings.armed) { bg = null; hits = 0; }
+        settings = { sensitivity: s.sensitivity, cooldown_s: s.cooldown_s, adapt_s: s.adapt_s, armed: s.armed };
+        store(SETTINGS_KEY, JSON.stringify(settings));
+        showArmState();
+        statusEl.textContent = 'Online, synced ' + new Date().toLocaleTimeString();
+        if (s.snapshot && !uploading && video.videoWidth) {
+          capture(function (blob) { sendPhoto(blob, 'snapshot', null); });
+        }
+      }).catch(function (e) {
+        statusEl.textContent = 'Offline (' + e.message + '), using last settings';
+      });
   }
 
-  testBtn.onclick = function () {
-    if (!video.videoWidth) { alert('Start the camera first'); return; }
-    capture(function (blob, thumbUrl) { alertMotion(blob, thumbUrl, 'test', null); });
-  };
-  testBtn.className = '';
-
-  function showLogin() {
-    document.getElementById('loginBox').className = '';
-    document.getElementById('camSection').className = 'hidden';
+  function showCodeBox(msg) {
+    el('codeBox').className = '';
+    el('camSection').className = 'hidden';
+    el('codeErr').textContent = msg || '';
   }
 
   function showCamera() {
-    document.getElementById('loginBox').className = 'hidden';
-    document.getElementById('camSection').className = '';
+    el('codeBox').className = 'hidden';
+    el('camSection').className = '';
+    startCamera();
   }
 
-  document.getElementById('codeSave').onclick = function () {
-    var code = document.getElementById('codeIn').value.trim();
+  el('start').onclick = startCamera;
+
+  el('codeSave').onclick = function () {
+    var code = el('codeIn').value.trim();
     if (code.length < 8) {
-      document.getElementById('codeErr').textContent = 'That code looks too short.';
+      el('codeErr').textContent = 'That code looks too short.';
       return;
     }
     store(CODE_KEY, code);
-    document.getElementById('codeIn').value = '';
-    document.getElementById('codeErr').textContent = '';
+    el('codeIn').value = '';
     showCamera();
   };
-  document.getElementById('logoutBtn').onclick = function () {
-    try { localStorage.removeItem(CODE_KEY); } catch (e) {}
-    showLogin();
+
+  el('forget').onclick = function () {
+    drop(CODE_KEY);
+    drop(SETTINGS_KEY);
+    location.reload();
   };
 
-  if (getCode()) { showCamera(); } else { showLogin(); }
+  if (getCode()) { showCamera(); } else { showCodeBox(''); }
 })();
 </script>
 </body>

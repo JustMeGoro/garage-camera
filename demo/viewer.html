@@ -21,6 +21,17 @@
   .invite { background: #1c1c1c; border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; font-size: 14px; }
   .invite select { width: 100%; padding: 8px; font-size: 15px; margin: 8px 0; }
   .invite .code { font-size: 22px; letter-spacing: 2px; color: #eee; }
+  .cam { border-top: 1px solid #333; padding: 10px 0; }
+  .camhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .status.on { color: #2ecc71; }
+  .status.off { color: #e67e22; }
+  .setting { margin: 10px 0; }
+  .setting label, .cam > label { display: block; font-size: 13px; color: #aaa; margin: 8px 0 2px; }
+  .setting input[type=range] { width: 100%; padding: 0; }
+  .bar2 { background: #333; height: 10px; position: relative; margin-bottom: 10px; }
+  .meter { background: #e67e22; height: 10px; width: 0; }
+  .mark { position: absolute; left: 33.3%; top: 0; width: 2px; height: 10px; background: #fff; }
+  .cam button { margin: 6px 6px 0 0; }
 </style>
 </head>
 <body>
@@ -35,6 +46,7 @@
     <details class="invite">
       <summary>Cameras</summary>
       <div id="camList" class="hint"></div>
+      <div class="hint">Add a new camera:</div>
       <input id="camName" type="text" placeholder="Name, e.g. Garage" style="width:100%;box-sizing:border-box;padding:8px;font-size:15px;margin:8px 0">
       <button id="camBtn">Add camera</button>
       <div id="camOut" class="hint"></div>
@@ -134,29 +146,121 @@
     }).catch(function (e) { out.textContent = e.message; });
   };
 
+  // ---- Cameras: settings live here, the camera phone fetches them every few seconds ----
+  var camParts = {};      // camera id -> elements that the live refresh updates
+  var camIds = '';
+
+  function add(parent, tag, text, cls) {
+    var e = document.createElement(tag);
+    if (text) { e.textContent = text; }
+    if (cls) { e.className = cls; }
+    parent.appendChild(e);
+    return e;
+  }
+
+  function save(id, patch) { sb.updateCamera(id, patch).catch(showErr); }
+
+  function slider(parent, label, min, max, value, fmt, onSave) {
+    var wrap = add(parent, 'div', '', 'setting');
+    var lab = add(wrap, 'label');
+    var inp = document.createElement('input');
+    inp.type = 'range'; inp.min = min; inp.max = max; inp.value = value;
+    function show() { lab.textContent = label + ': ' + fmt(Number(inp.value)); }
+    inp.oninput = show;
+    inp.onchange = function () { onSave(Number(inp.value)); };
+    wrap.appendChild(inp);
+    show();
+  }
+
+  function pct(c) { return c.sensitivity / 20; }
+
+  function updateLive(c) {
+    var p = camParts[c.id];
+    if (!p) { return; }
+    var online = c.pinged_at && (Date.now() - new Date(c.pinged_at).getTime()) < 30000;
+    p.status.textContent = online ? 'online' : (c.pinged_at ? 'offline, last seen ' + new Date(c.pinged_at).toLocaleString() : 'never connected');
+    p.status.className = 'status ' + (online ? 'on' : 'off');
+    p.arm.textContent = c.armed ? 'Armed (tap to disarm)' : 'Disarmed (tap to arm)';
+    p.arm.className = c.armed ? '' : 'grey';
+    var level = online && c.motion_now != null ? Number(c.motion_now) : 0;
+    p.meter.style.width = Math.min(100, level / (pct(c) * 3) * 100) + '%';
+    p.snap.textContent = c.snapshot_requested ? 'Photo requested...' : 'Take photo now';
+    p.snap.disabled = !!c.snapshot_requested;
+  }
+
+  function renderCameras(cams) {
+    var box = $('camList');
+    box.innerHTML = '';
+    camParts = {};
+    camIds = cams.map(function (c) { return c.id; }).join(',');
+    if (!cams.length) { box.textContent = 'No cameras yet.'; return; }
+    cams.forEach(function (c) {
+      var card = add(box, 'div', '', 'cam');
+      var head = add(card, 'div', '', 'camhead');
+      add(head, 'b', c.name);
+      var status = add(head, 'span', '', 'status');
+
+      var arm = add(card, 'button');
+      arm.onclick = function () {
+        var next = arm.textContent.indexOf('Armed') !== 0;
+        save(c.id, { armed: next });
+        arm.textContent = next ? 'Armed (tap to disarm)' : 'Disarmed (tap to arm)';
+        arm.className = next ? '' : 'grey';
+      };
+
+      slider(card, 'Sensitivity', 1, 100, c.sensitivity,
+        function (v) { return 'alert at ' + (v / 20).toFixed(2) + '% of the image changing (lower = more sensitive)'; },
+        function (v) { c.sensitivity = v; save(c.id, { sensitivity: v }); });
+      slider(card, 'Pause between alerts', 5, 600, c.cooldown_s,
+        function (v) { return v + ' s'; },
+        function (v) { save(c.id, { cooldown_s: v }); });
+      slider(card, 'Scene adapts after', 10, 300, c.adapt_s,
+        function (v) { return 'about ' + v + ' s (a moved car or object stops counting as motion)'; },
+        function (v) { save(c.id, { adapt_s: v }); });
+
+      add(card, 'label', 'Live motion level (white mark = alert threshold, updates every few seconds)');
+      var bar = add(card, 'div', '', 'bar2');
+      var meter = add(bar, 'div', '', 'meter');
+      add(bar, 'div', '', 'mark');
+
+      var topicWrap = add(card, 'div', '', 'setting');
+      add(topicWrap, 'label', 'Alert topic for the ntfy app (text-only push, optional)');
+      var topic = document.createElement('input');
+      topic.type = 'text'; topic.value = c.ntfy_topic || ''; topic.placeholder = 'e.g. garage-k3x9q2';
+      topic.style.cssText = 'width:100%;box-sizing:border-box;padding:8px;font-size:15px';
+      topic.onchange = function () {
+        var v = topic.value.trim();
+        sb.updateCamera(c.id, { ntfy_topic: v || null }).catch(function (e) { showErr(new Error('Topic: 6-64 letters, digits, - or _')); });
+      };
+      topicWrap.appendChild(topic);
+      var gen = add(topicWrap, 'button', 'Generate random topic', 'grey');
+      gen.onclick = function () {
+        var chars = 'abcdefghijkmnpqrstuvwxyz23456789', s = 'garage-';
+        for (var i = 0; i < 10; i++) { s += chars.charAt(Math.floor(Math.random() * chars.length)); }
+        topic.value = s;
+        topic.onchange();
+      };
+
+      var snap = add(card, 'button', 'Take photo now', 'grey');
+      snap.onclick = function () { save(c.id, { snapshot_requested: true }); snap.textContent = 'Photo requested...'; snap.disabled = true; };
+      var del = add(card, 'button', 'Remove camera', 'grey');
+      del.onclick = function () {
+        if (!confirm('Remove camera "' + c.name + '"? Its code stops working and its photos are deleted.')) { return; }
+        sb.deleteCamera(c.id).then(function () { loadCameras(); load(); }).catch(showErr);
+      };
+
+      camParts[c.id] = { status: status, arm: arm, meter: meter, snap: snap };
+      updateLive(c);
+    });
+  }
+
   function loadCameras() {
-    sb.listCameras().then(function (cams) {
-      var box = $('camList');
-      box.innerHTML = '';
-      if (!cams.length) { box.textContent = 'No cameras yet.'; return; }
-      cams.forEach(function (c) {
-        var row = document.createElement('div');
-        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin:6px 0';
-        var info = document.createElement('span');
-        info.textContent = c.name + ' - ' + (c.last_seen ? 'last photo ' + new Date(c.last_seen).toLocaleString() : 'no photo yet');
-        var del = document.createElement('button');
-        del.className = 'grey';
-        del.textContent = 'Remove';
-        del.onclick = function () {
-          if (!confirm('Remove camera "' + c.name + '"? Its code stops working and its photos are deleted from the list.')) { return; }
-          sb.deleteCamera(c.id).then(function () { loadCameras(); load(); }).catch(showErr);
-        };
-        row.appendChild(info);
-        row.appendChild(del);
-        box.appendChild(row);
-      });
+    return sb.listCameras().then(function (cams) {
+      var ids = cams.map(function (c) { return c.id; }).join(',');
+      if (ids !== camIds) { renderCameras(cams); } else { cams.forEach(updateLive); }
     }).catch(showErr);
   }
+  setInterval(function () { if (sb.loggedIn() && $('app').className === '') { loadCameras(); } }, 5000);
 
   $('camBtn').onclick = function () {
     var out = $('camOut');
