@@ -33,8 +33,10 @@
   <h1>Garage camera</h1>
 
   <section id="loginBox" class="hidden">
-    <div class="hint">Use a camera account. It can only upload photos, never view them. Get a "Camera" invite code from the viewer page.</div>
-    <div id="authBox"></div>
+    <div class="hint">Enter the camera code. Create one on the viewer page under "Cameras". The code only lets this phone upload photos, never view them.</div>
+    <input id="codeIn" type="text" placeholder="Camera code" autocapitalize="characters" autocomplete="off">
+    <button id="codeSave">Save code</button>
+    <div class="err" id="codeErr"></div>
   </section>
 
   <div id="camSection" class="hidden">
@@ -78,16 +80,15 @@
   <ul id="log"></ul>
   <canvas id="work" width="160" height="120" style="display:none"></canvas>
   <canvas id="full" style="display:none"></canvas>
-  <button id="logoutBtn" class="off">Log out camera</button>
+  <button id="logoutBtn" class="off">Forget camera code</button>
   </div>
 </main>
 
 <script src="config.js"></script>
-<script src="sb.js"></script>
-<script src="auth.js"></script>
 <script>
 (function () {
-  var sb = makeSb('garage_camera_session');
+  var cfg = window.GARAGE_CONFIG;
+  var CODE_KEY = 'garage_camera_code';
   var video = document.getElementById('video');
   var badge = document.getElementById('badge');
   var work = document.getElementById('work');
@@ -233,20 +234,31 @@
     log.insertBefore(li, log.firstChild);
   }
 
-  // Upload the photo to the private bucket, record the event, then send a text-only push.
+  function getCode() { return load(CODE_KEY); }
+
+  // Send the photo to the camera-upload function, which checks the code and stores it privately.
+  // Then send a text-only push.
   function alertMotion(blob, thumbUrl, kind, pct) {
     var label = kind === 'test' ? 'Test alert' : 'Motion in the garage';
     addLog(thumbUrl, label);
     var entry = log.firstChild.lastChild;
-    var path = sb.userId() + '/' + Date.now() + '.jpg';
-    sb.upload(path, blob).then(function () {
-      return sb.insertEvent({ kind: kind, photo_path: path, motion_pct: pct ? Math.round(pct * 100) / 100 : null });
-    }).then(function () {
+    var query = '?kind=' + kind + (pct ? '&pct=' + (Math.round(pct * 100) / 100) : '');
+    fetch(cfg.url + '/functions/v1/camera-upload' + query, {
+      method: 'POST',
+      headers: { 'x-camera-secret': getCode() || '', 'Content-Type': 'image/jpeg' },
+      body: blob
+    }).then(function (r) {
+      if (r.status === 401) {
+        entry.textContent += ' - code rejected';
+        try { localStorage.removeItem(CODE_KEY); } catch (e) {}
+        showLogin();
+        return;
+      }
+      if (!r.ok) { throw new Error('HTTP ' + r.status); }
       entry.textContent += ' - uploaded';
       sendPush(label);
     }).catch(function (e) {
       entry.textContent += ' - upload failed: ' + e.message;
-      if (!sb.loggedIn()) { showLogin(); auth.show(); }
     });
   }
 
@@ -277,17 +289,23 @@
     document.getElementById('camSection').className = '';
   }
 
-  var auth = GarageAuth.init({
-    sb: sb,
-    el: document.getElementById('authBox'),
-    role: 'camera',
-    onReady: showCamera
-  });
+  document.getElementById('codeSave').onclick = function () {
+    var code = document.getElementById('codeIn').value.trim().toUpperCase();
+    if (code.length < 16) {
+      document.getElementById('codeErr').textContent = 'That code looks too short.';
+      return;
+    }
+    store(CODE_KEY, code);
+    document.getElementById('codeIn').value = '';
+    document.getElementById('codeErr').textContent = '';
+    showCamera();
+  };
+  document.getElementById('logoutBtn').onclick = function () {
+    try { localStorage.removeItem(CODE_KEY); } catch (e) {}
+    showLogin();
+  };
 
-  document.getElementById('logoutBtn').onclick = function () { sb.logout(); showLogin(); auth.show(); };
-
-  showLogin();
-  auth.start();
+  if (getCode()) { showCamera(); } else { showLogin(); }
 })();
 </script>
 </body>

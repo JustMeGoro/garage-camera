@@ -107,6 +107,13 @@ window.makeSb = function (storeKey) {
         body: JSON.stringify(row)
       });
     },
+    listCameras: function () {
+      return api('/rest/v1/cameras?select=id,name,created_at,last_seen&order=created_at.asc')
+        .then(function (r) { return r.json(); });
+    },
+    deleteCamera: function (id) {
+      return api('/rest/v1/cameras?id=eq.' + id, { method: 'DELETE' });
+    },
     listEvents: function (limit) {
       return api('/rest/v1/events?select=id,created_at,kind,photo_path,motion_pct&order=created_at.desc&limit=' + limit)
         .then(function (r) { return r.json(); });

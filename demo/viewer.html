@@ -33,11 +33,15 @@
     <div class="bar"><span id="who"></span><span><button class="grey" id="refreshBtn">Refresh</button><button class="grey" id="logoutBtn">Log out</button></span></div>
     <div class="err" id="err"></div>
     <details class="invite">
-      <summary>Invite someone</summary>
-      <select id="inviteRole">
-        <option value="viewer">Viewer (sees the photos, e.g. family)</option>
-        <option value="camera">Camera (a phone that uploads photos)</option>
-      </select>
+      <summary>Cameras</summary>
+      <div id="camList" class="hint"></div>
+      <input id="camName" type="text" placeholder="Name, e.g. Garage" style="width:100%;box-sizing:border-box;padding:8px;font-size:15px;margin:8px 0">
+      <button id="camBtn">Add camera</button>
+      <div id="camOut" class="hint"></div>
+    </details>
+    <details class="invite">
+      <summary>Invite a family member</summary>
+      <div class="hint">They will be able to see all photos.</div>
       <button id="inviteBtn">Create invite code</button>
       <div id="inviteOut" class="hint"></div>
     </details>
@@ -102,6 +106,7 @@
     $('who').textContent = sb.email();
     show(true);
     load();
+    loadCameras();
     clearInterval(timer);
     timer = setInterval(load, 20000);
   }
@@ -119,13 +124,52 @@
   $('inviteBtn').onclick = function () {
     var out = $('inviteOut');
     out.textContent = 'Creating...';
-    sb.rpc('create_invite', { p_role: $('inviteRole').value }).then(function (code) {
+    sb.rpc('create_invite', { p_role: 'viewer' }).then(function (code) {
       out.innerHTML = '';
       var c = document.createElement('div');
       c.className = 'code';
       c.textContent = code;
       out.appendChild(c);
       out.appendChild(document.createTextNode('One use, valid for 7 days. The person opens this page, creates an account and enters the code.'));
+    }).catch(function (e) { out.textContent = e.message; });
+  };
+
+  function loadCameras() {
+    sb.listCameras().then(function (cams) {
+      var box = $('camList');
+      box.innerHTML = '';
+      if (!cams.length) { box.textContent = 'No cameras yet.'; return; }
+      cams.forEach(function (c) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin:6px 0';
+        var info = document.createElement('span');
+        info.textContent = c.name + ' - ' + (c.last_seen ? 'last photo ' + new Date(c.last_seen).toLocaleString() : 'no photo yet');
+        var del = document.createElement('button');
+        del.className = 'grey';
+        del.textContent = 'Remove';
+        del.onclick = function () {
+          if (!confirm('Remove camera "' + c.name + '"? Its code stops working and its photos are deleted from the list.')) { return; }
+          sb.deleteCamera(c.id).then(function () { loadCameras(); load(); }).catch(showErr);
+        };
+        row.appendChild(info);
+        row.appendChild(del);
+        box.appendChild(row);
+      });
+    }).catch(showErr);
+  }
+
+  $('camBtn').onclick = function () {
+    var out = $('camOut');
+    out.textContent = 'Creating...';
+    sb.rpc('create_camera', { p_name: $('camName').value }).then(function (code) {
+      out.innerHTML = '';
+      var c = document.createElement('div');
+      c.className = 'code';
+      c.textContent = code;
+      out.appendChild(c);
+      out.appendChild(document.createTextNode('Enter this code on the camera phone. It is shown only once, so copy it now.'));
+      $('camName').value = '';
+      loadCameras();
     }).catch(function (e) { out.textContent = e.message; });
   };
 
