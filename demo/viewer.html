@@ -50,6 +50,8 @@
   .foot button { background: rgba(255,255,255,.18); padding: 8px 12px; white-space: nowrap; }
 
   h2 { font-size: 15px; font-weight: 600; margin: 22px 0 10px; color: var(--mute); text-transform: uppercase; letter-spacing: .6px; }
+  .sechead { display: flex; justify-content: space-between; align-items: flex-end; }
+  button.small { padding: 6px 10px; font-size: 13px; margin-bottom: 10px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
   .thumb { padding: 0; background: var(--card); border: 1px solid var(--line); text-align: left; overflow: hidden; border-radius: 10px; }
   .thumb img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: #000; }
@@ -90,9 +92,9 @@
   <main>
     <div class="err top" id="err"></div>
     <div id="cams"></div>
-    <h2>Recent activity</h2>
+    <div class="sechead"><h2>Recent activity</h2><button id="delAll" class="grey small">Delete all photos</button></div>
     <div id="grid" class="grid"></div>
-    <div class="hint" style="margin-top:24px">Version 20261023e</div>
+    <div class="hint" style="margin-top:24px">Version 20261023f</div>
   </main>
 </div>
 
@@ -103,9 +105,9 @@
   </div>
 </div>
 
-<script src="config.js?v=20261023e"></script>
-<script src="sb.js?v=20261023e"></script>
-<script src="auth.js?v=20261023e"></script>
+<script src="config.js?v=20261023f"></script>
+<script src="sb.js?v=20261023f"></script>
+<script src="auth.js?v=20261023f"></script>
 <script>
 (function () {
   var sb = makeSb('garage_viewer_session');
@@ -118,6 +120,7 @@
   var urls = {};             // photo path -> signed url
   var lives = {};            // camera id -> running live view
   var prevSnap = {};
+  var prevSeen = {};
   var modalState = null;     // { update(cam) } while a camera settings modal is open
   var LIVE_MAX_MS = 10 * 60 * 1000;
   var LIVE_FRAME_MS = 150;
@@ -245,6 +248,9 @@
       list.forEach(function (c) { box.appendChild(buildCard(c)); });
     }
     list.forEach(function (c) {
+      // A new photo from this camera: show it now instead of waiting for the next periodic refresh.
+      if (prevSeen[c.id] !== undefined && c.last_seen !== prevSeen[c.id]) { loadEvents(); }
+      prevSeen[c.id] = c.last_seen;
       var wasSnap = prevSnap[c.id];
       prevSnap[c.id] = c.snapshot_requested;
       updateCard(c);
@@ -303,6 +309,18 @@
       });
     }).catch(showErr);
   }
+
+  $('delAll').onclick = function () {
+    if (!events.length) { showErr(new Error('There are no photos to delete.')); return; }
+    if (!confirm('Delete ALL photos from all cameras? This cannot be undone.')) { return; }
+    var btn = $('delAll');
+    btn.disabled = true;
+    btn.textContent = 'Deleting...';
+    sb.deleteAllPhotos().then(function () { return loadEvents(); }).catch(showErr).then(function () {
+      btn.disabled = false;
+      btn.textContent = 'Delete all photos';
+    });
+  };
 
   // ---------- live view ----------
   // First choice: real video (WebRTC, direct link camera <-> this page, signalling through the cameras table).

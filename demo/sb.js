@@ -123,6 +123,24 @@ window.makeSb = function (storeKey) {
         .then(function (r) { return r.json(); })
         .then(function (rows) { return rows.length ? rows[0].rtc_answer : null; });
     },
+    // Removes every photo file and every event row, in batches of up to 500.
+    deleteAllPhotos: function () {
+      function batch() {
+        return api('/rest/v1/events?select=id,photo_path&limit=500').then(function (r) { return r.json(); }).then(function (rows) {
+          if (!rows.length) { return; }
+          var paths = rows.map(function (x) { return x.photo_path; });
+          var ids = rows.map(function (x) { return x.id; });
+          return api('/storage/v1/object/garage-photos', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prefixes: paths })
+          }).then(function () {
+            return api('/rest/v1/events?id=in.(' + ids.join(',') + ')', { method: 'DELETE' });
+          }).then(batch);
+        });
+      }
+      return batch();
+    },
     deleteObject: function (path) {
       return api('/storage/v1/object/garage-photos/' + path, { method: 'DELETE' });
     },

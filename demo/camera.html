@@ -52,10 +52,10 @@
   <canvas id="liveC" style="display:none"></canvas>
 </main>
 
-<script src="config.js?v=20261023e"></script>
+<script src="config.js?v=20261023f"></script>
 <script>
 (function () {
-  var BUILD = '20261023e';      // keep equal to version.json; the page reloads itself when they differ
+  var BUILD = '20261023f';      // keep equal to version.json; the page reloads itself when they differ
   var cfg = window.GARAGE_CONFIG;
   var CODE_KEY = 'garage_camera_code';
   var SETTINGS_KEY = 'garage_camera_settings';
@@ -122,7 +122,7 @@
       started = true;
       el('start').className = 'hidden';
       showArmState();
-      setInterval(tick, 250);
+      setInterval(tick, 200);
       sync();
       setInterval(sync, SYNC_MS);
     }).catch(function (err) {
@@ -176,7 +176,9 @@
     if (pct > maxLevel) { maxLevel = pct; }
     if (!settings.armed) { hits = 0; return; }
     hits = pct >= sensPct() ? hits + 1 : 0;
-    if (hits >= 2 && now - lastAlert > Number(settings.cooldown_s) * 1000) {
+    // Strong motion triggers at once; weaker motion must be seen twice in a row (filters noise).
+    var strong = pct >= sensPct() * 2;
+    if ((hits >= 2 || (strong && hits >= 1)) && now - lastAlert > Number(settings.cooldown_s) * 1000) {
       hits = 0;
       lastAlert = now;
       setBadge('MOTION', 'motion');
