@@ -188,6 +188,52 @@
     p.snap.disabled = !!c.snapshot_requested;
   }
 
+  // ---- Near-live view: the camera sends a small frame about once a second while this is open ----
+  var lives = {};         // camera id -> running live view
+  var LIVE_MAX_MS = 5 * 60 * 1000;
+
+  function stopLive(id, msg) {
+    var l = lives[id];
+    if (!l) { return; }
+    clearInterval(l.keep);
+    clearTimeout(l.timer);
+    delete lives[id];
+    save(id, { live_until: null });
+    l.box.className = 'livebox hidden';
+    l.btn.textContent = 'Live view (testing)';
+    if (msg) { showErr(new Error(msg)); }
+  }
+
+  function startLive(c, btn, box, img, note) {
+    var path = 'live/' + c.id + '.jpg';
+    var l = { btn: btn, box: box, url: null, timer: null, keep: null, stopAt: Date.now() + LIVE_MAX_MS };
+    lives[c.id] = l;
+    box.className = 'livebox';
+    btn.textContent = 'Stop live view';
+    note.textContent = 'Waiting for the camera (it checks in every few seconds)...';
+    sb.deleteObject(path).catch(function () {});      // drop a stale frame from an earlier session
+
+    function keepAlive() { save(c.id, { live_until: new Date(Date.now() + 45000).toISOString() }); }
+    keepAlive();
+    l.keep = setInterval(keepAlive, 20000);
+
+    function tick() {
+      if (lives[c.id] !== l) { return; }
+      if (Date.now() > l.stopAt) { stopLive(c.id, 'Live view stopped after 5 minutes.'); return; }
+      if (!l.url) {
+        sb.signPaths([path]).then(function (map) {
+          l.url = map[path] || null;
+          l.timer = setTimeout(tick, l.url ? 0 : 1500);
+        }).catch(function () { l.timer = setTimeout(tick, 2000); });
+        return;
+      }
+      img.onload = function () { note.textContent = 'Live (about one frame per second)'; l.timer = setTimeout(tick, 800); };
+      img.onerror = function () { l.url = null; l.timer = setTimeout(tick, 1500); };
+      img.src = l.url + (l.url.indexOf('?') < 0 ? '?' : '&') + 't=' + Date.now();
+    }
+    tick();
+  }
+
   function renderCameras(cams) {
     var box = $('camList');
     box.innerHTML = '';
@@ -243,6 +289,16 @@
 
       var snap = add(card, 'button', 'Take photo now', 'grey');
       snap.onclick = function () { save(c.id, { snapshot_requested: true }); snap.textContent = 'Photo requested...'; snap.disabled = true; };
+      var liveBtn = add(card, 'button', 'Live view (testing)', 'grey');
+      var liveBox = add(card, 'div', '', 'livebox hidden');
+      var liveImg = document.createElement('img');
+      liveImg.alt = 'live view';
+      liveImg.style.cssText = 'width:100%;display:block;background:#000;min-height:120px;margin-top:8px';
+      liveBox.appendChild(liveImg);
+      var liveNote = add(liveBox, 'div', '', 'hint');
+      liveBtn.onclick = function () {
+        if (lives[c.id]) { stopLive(c.id); } else { startLive(c, liveBtn, liveBox, liveImg, liveNote); }
+      };
       var del = add(card, 'button', 'Remove camera', 'grey');
       del.onclick = function () {
         if (!confirm('Remove camera "' + c.name + '"? Its code stops working and its photos are deleted.')) { return; }
@@ -257,7 +313,10 @@
   function loadCameras() {
     return sb.listCameras().then(function (cams) {
       var ids = cams.map(function (c) { return c.id; }).join(',');
-      if (ids !== camIds) { renderCameras(cams); } else { cams.forEach(updateLive); }
+      if (ids !== camIds) {
+        Object.keys(lives).forEach(function (id) { stopLive(id); });
+        renderCameras(cams);
+      } else { cams.forEach(updateLive); }
     }).catch(showErr);
   }
   setInterval(function () { if (sb.loggedIn() && $('app').className === '') { loadCameras(); } }, 5000);

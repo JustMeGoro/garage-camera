@@ -48,6 +48,7 @@
 
   <canvas id="work" width="160" height="120" style="display:none"></canvas>
   <canvas id="full" style="display:none"></canvas>
+  <canvas id="liveC" style="display:none"></canvas>
 </main>
 
 <script src="config.js"></script>
@@ -214,9 +215,42 @@
         if (s.snapshot && !uploading && video.videoWidth) {
           capture(function (blob) { sendPhoto(blob, 'snapshot', null); });
         }
+        if (s.live && !liveOn) { liveOn = true; liveLoop(); }
       }).catch(function (e) {
         statusEl.textContent = 'Offline (' + e.message + '), using last settings';
       });
+  }
+
+  // Near-live view: while a viewer watches, send a small frame about once a second.
+  // The server tells us when to stop (the viewer closed the live view).
+  var liveOn = false;
+
+  function liveLoop() {
+    if (!liveOn || !video.videoWidth) { liveOn = false; return; }
+    var c = el('liveC');
+    var scale = Math.min(1, 480 / video.videoWidth);
+    c.width = Math.round(video.videoWidth * scale);
+    c.height = Math.round(video.videoHeight * scale);
+    c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+
+    function send(blob) {
+      fn('?action=live', { headers: { 'Content-Type': 'image/jpeg' }, body: blob }).then(function (r) {
+        if (r.status === 401) { liveOn = false; codeRejected(); return null; }
+        return r.json();
+      }).then(function (j) {
+        if (!j || !j.live) { liveOn = false; return; }
+        setTimeout(liveLoop, 700);
+      }).catch(function () { setTimeout(liveLoop, 3000); });
+    }
+
+    if (c.toBlob) {
+      c.toBlob(send, 'image/jpeg', 0.45);
+    } else {
+      var bin = atob(c.toDataURL('image/jpeg', 0.45).split(',')[1]);
+      var arr = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) { arr[i] = bin.charCodeAt(i); }
+      send(new Blob([arr], { type: 'image/jpeg' }));
+    }
   }
 
   function showCodeBox(msg) {
