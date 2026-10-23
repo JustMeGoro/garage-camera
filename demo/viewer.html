@@ -27,6 +27,7 @@
   .who span { max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   button.icon { background: transparent; color: var(--text); padding: 7px; border-radius: 50%; line-height: 0; }
   button.icon:hover { background: #23262d; }
+  button.icon.on { color: var(--green); }
   button.icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
   main { max-width: 880px; margin: 0 auto; padding: 14px 16px 40px; }
@@ -84,6 +85,7 @@
     <div class="brand">Garage</div>
     <div class="who">
       <span id="who"></span>
+      <button class="icon" id="bellBtn" title="Notifications on this device"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 6 2 7.5 2 7.5H4S6 15 6 9z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></button>
       <button class="icon" id="addCamBtn" title="Add a camera"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-2h6l2 2h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><path d="M12 10.5v5M9.5 13h5"/></svg></button>
       <button class="icon" id="inviteBtn" title="Invite someone"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.5 3.2-5.5 6.5-5.5s5.9 2 6.5 5.5"/><path d="M19 8v6M16 11h6"/></svg></button>
       <button class="icon" id="logoutBtn" title="Log out"><svg viewBox="0 0 24 24"><path d="M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h5"/><path d="M15 8l4 4-4 4M19 12H9"/></svg></button>
@@ -94,7 +96,7 @@
     <div id="cams"></div>
     <div class="sechead"><h2>Recent activity</h2><button id="delAll" class="grey small">Delete all photos</button></div>
     <div id="grid" class="grid"></div>
-    <div class="hint" style="margin-top:24px">Version 20261023j</div>
+    <div class="hint" style="margin-top:24px">Version 20261023k</div>
   </main>
 </div>
 
@@ -105,9 +107,9 @@
   </div>
 </div>
 
-<script src="config.js?v=20261023j"></script>
-<script src="sb.js?v=20261023j"></script>
-<script src="auth.js?v=20261023j"></script>
+<script src="config.js?v=20261023k"></script>
+<script src="sb.js?v=20261023k"></script>
+<script src="auth.js?v=20261023k"></script>
 <script>
 (function () {
   var sb = makeSb('garage_viewer_session');
@@ -528,7 +530,7 @@
     body.appendChild(lw);
 
     var tw = h('div', 'setting');
-    tw.appendChild(h('label', '', 'Alert topic for the ntfy app (text-only push, optional)'));
+    tw.appendChild(h('label', '', 'Extra alerts through the ntfy app (optional; ntfy limits free messages per day)'));
     var topic = document.createElement('input');
     topic.type = 'text'; topic.value = c.ntfy_topic || ''; topic.placeholder = 'e.g. garage-k3x9q2';
     topic.onchange = function () {
@@ -547,19 +549,13 @@
     var testBtn = h('button', 'grey', 'Send test notification');
     var testOut = h('div', 'hint');
     testBtn.onclick = function () {
-      var t = topic.value.trim();
-      if (!t) { testOut.textContent = 'Enter or generate a topic first.'; return; }
       testBtn.disabled = true;
       testOut.textContent = 'Sending...';
       // Save the topic first so the test uses what is shown in the box.
-      sb.updateCamera(id, { ntfy_topic: t }).then(function () {
+      sb.updateCamera(id, { ntfy_topic: topic.value.trim() || null }).then(function () {
         return sb.callFunction('camera-test-notify', { id: id });
       }).then(function (res) {
-        if (res.ok) {
-          testOut.textContent = 'Sent to topic "' + res.topic + '" (ntfy answered ' + res.status + '). In the ntfy app, subscribe to exactly this topic: letters are case-sensitive. It should arrive within a few seconds.';
-        } else {
-          testOut.textContent = 'Not delivered: ' + (res.error || ('ntfy answered ' + res.status + ' ' + (res.detail || '')));
-        }
+        testOut.textContent = describeTest(res);
       }).catch(function (e) {
         testOut.textContent = 'Test failed: ' + e.message;
       }).then(function () { testBtn.disabled = false; });
@@ -596,6 +592,136 @@
     update(c);
     openModal(c.name + ' - settings', body, { id: id, update: update });
   }
+
+  // ---------- notifications on this device (Web Push, free, no message limit) ----------
+  var pushCfg = window.GARAGE_CONFIG;
+
+  function pushSupported() {
+    return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  }
+
+  function b64ToBytes(b64) {
+    var pad = '='.repeat((4 - (b64.length % 4)) % 4);
+    var bin = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) { out[i] = bin.charCodeAt(i); }
+    return out;
+  }
+
+  function deviceLabel() {
+    var m = /Android|iPhone|iPad|Windows|Macintosh|Linux/.exec(navigator.userAgent);
+    return m ? m[0] : 'browser';
+  }
+
+  function pushState() {
+    return navigator.serviceWorker.register('sw.js').then(function () { return navigator.serviceWorker.ready; })
+      .then(function (reg) { return reg.pushManager.getSubscription().then(function (sub) { return { reg: reg, sub: sub }; }); });
+  }
+
+  function enablePush() {
+    return fetch(pushCfg.url + '/functions/v1/push-key', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (k) {
+      if (!k.publicKey) { throw new Error('The server has no push key yet.'); }
+      return pushState().then(function (s) {
+        return Notification.requestPermission().then(function (perm) {
+          if (perm !== 'granted') { throw new Error('Notifications are blocked. Allow them for this site in the browser settings.'); }
+          return s.sub || s.reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(k.publicKey) });
+        });
+      });
+    }).then(function (sub) {
+      var j = sub.toJSON();
+      return sb.saveSubscription({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, label: deviceLabel() });
+    });
+  }
+
+  function disablePush() {
+    return pushState().then(function (s) {
+      if (!s.sub) { return; }
+      var endpoint = s.sub.endpoint;
+      return s.sub.unsubscribe().then(function () { return sb.deleteSubscription(endpoint); });
+    });
+  }
+
+  function refreshBell() {
+    var b = $('bellBtn');
+    b.className = 'icon';
+    if (!pushSupported()) { return; }
+    pushState().then(function (s) {
+      b.className = 'icon' + (s.sub && Notification.permission === 'granted' ? ' on' : '');
+    }).catch(function () {});
+  }
+
+  function describeTest(res) {
+    var lines = [];
+    if (res.push) {
+      if (!res.push.devices) {
+        lines.push('No device has notifications enabled yet. Tap the bell icon at the top of the page on each device.');
+      } else {
+        lines.push('Notifications: sent to ' + res.push.sent + ' of ' + res.push.devices + ' device(s)' +
+          (res.push.failed ? ', ' + res.push.failed + ' failed' : '') +
+          (res.push.removed ? ', ' + res.push.removed + ' expired device(s) removed (enable notifications there again)' : '') + '.');
+      }
+    } else if (res.push === null) {
+      lines.push('Notifications: the server could not send them.');
+    }
+    if (res.ntfy) {
+      lines.push(res.ntfy.error ? 'ntfy: ' + res.ntfy.error : 'ntfy (topic ' + res.ntfy.topic + '): answered ' + res.ntfy.status + (res.ntfy.status >= 200 && res.ntfy.status < 300 ? '' : ' - refused, probably its daily limit.'));
+    }
+    if (res.error) { lines.push(res.error); }
+    return lines.join(' ');
+  }
+
+  function openBell() {
+    var body = h('div');
+    var info = h('div', 'hint');
+    var toggle = h('button', '', 'Turn on for this device');
+    var test = h('button', 'grey', 'Send test notification');
+    var out = h('div', 'hint');
+    body.appendChild(info);
+    var row = h('div', 'row');
+    row.appendChild(toggle);
+    row.appendChild(test);
+    body.appendChild(row);
+    body.appendChild(out);
+    body.appendChild(h('div', 'hint', 'Alerts go to every device where you enabled this. On an iPhone, first add this page to the Home Screen (Share, Add to Home Screen) and open it from there.'));
+
+    function show() {
+      if (!pushSupported()) {
+        info.textContent = 'This browser cannot receive notifications.';
+        toggle.className = 'hidden';
+        test.className = 'hidden';
+        return;
+      }
+      pushState().then(function (s) {
+        var on = !!s.sub && Notification.permission === 'granted';
+        info.textContent = on ? 'Notifications are ON for this device.' : (Notification.permission === 'denied' ? 'Notifications are blocked for this site in the browser settings.' : 'Notifications are OFF for this device.');
+        toggle.textContent = on ? 'Turn off on this device' : 'Turn on for this device';
+        toggle.className = on ? 'grey' : '';
+        refreshBell();
+      }).catch(function (e) { info.textContent = 'Could not check notifications: ' + e.message; });
+    }
+
+    toggle.onclick = function () {
+      toggle.disabled = true;
+      out.textContent = '';
+      pushState().then(function (s) { return s.sub && Notification.permission === 'granted' ? disablePush() : enablePush(); })
+        .then(show).catch(function (e) { out.textContent = e.message; })
+        .then(function () { toggle.disabled = false; });
+    };
+
+    test.onclick = function () {
+      var firstId = Object.keys(camById)[0];
+      if (!firstId) { out.textContent = 'Add a camera first.'; return; }
+      test.disabled = true;
+      out.textContent = 'Sending...';
+      sb.callFunction('camera-test-notify', { id: firstId }).then(function (res) { out.textContent = describeTest(res); })
+        .catch(function (e) { out.textContent = 'Test failed: ' + e.message; })
+        .then(function () { test.disabled = false; });
+    };
+
+    show();
+    openModal('Notifications', body);
+  }
+  $('bellBtn').onclick = openBell;
 
   // ---------- add camera / invite ----------
   function codeBlock(body, code, note) {
@@ -643,6 +769,7 @@
 
   function ready() {
     $('who').textContent = sb.email();
+    refreshBell();
     show(true);
     loadCams().then(loadEvents);
     clearInterval(polling);

@@ -118,6 +118,16 @@ window.makeSb = function (storeKey) {
         body: JSON.stringify(patch)
       });
     },
+    saveSubscription: function (row) {
+      return api('/rest/v1/push_subscriptions?on_conflict=endpoint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(row)
+      });
+    },
+    deleteSubscription: function (endpoint) {
+      return api('/rest/v1/push_subscriptions?endpoint=eq.' + encodeURIComponent(endpoint), { method: 'DELETE' });
+    },
     callFunction: function (name, payload) {
       return api('/functions/v1/' + name, {
         method: 'POST',
