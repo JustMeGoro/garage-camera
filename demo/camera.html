@@ -43,6 +43,7 @@
       <button id="forget" class="off">Forget camera code</button>
     </div>
     <div class="hint" id="status"></div>
+    <div class="hint" id="build"></div>
     <div class="hint">Settings (sensitivity, pause, arming, alerts) are set in the viewer. Keep this page open and the phone plugged in.</div>
   </section>
 
@@ -51,9 +52,10 @@
   <canvas id="liveC" style="display:none"></canvas>
 </main>
 
-<script src="config.js?v=20261023c"></script>
+<script src="config.js?v=20261023d"></script>
 <script>
 (function () {
+  var BUILD = '20261023d';      // keep equal to version.json; the page reloads itself when they differ
   var cfg = window.GARAGE_CONFIG;
   var CODE_KEY = 'garage_camera_code';
   var SETTINGS_KEY = 'garage_camera_settings';
@@ -344,6 +346,22 @@
     drop(SETTINGS_KEY);
     location.reload();
   };
+
+  // Self-update: an old cached copy of this page would never learn about new features.
+  document.getElementById('build').textContent = 'Version ' + BUILD;
+  function checkVersion() {
+    fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (v) {
+      if (v && v.build && v.build !== BUILD) {
+        var last = Number(load('garage_camera_reload') || 0);
+        if (Date.now() - last > 120000) {      // at most one reload per two minutes
+          store('garage_camera_reload', String(Date.now()));
+          location.reload();
+        }
+      }
+    }).catch(function () {});
+  }
+  checkVersion();
+  setInterval(checkVersion, 60000);
 
   if (getCode()) { showCamera(); } else { showCodeBox(''); }
 })();
