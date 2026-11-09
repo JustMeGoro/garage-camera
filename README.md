@@ -89,6 +89,9 @@ This repository is public on purpose, and that is safe: it contains **no secrets
 | `demo/sb.js`, `demo/auth.js`, `demo/config.js` | A tiny Supabase client (fetch only), the login box and the public project settings |
 | `demo/sw.js` | Service worker that shows push notifications |
 | `demo/version.json` | Version marker; the camera page reloads itself when it changes |
+| `supabase/migrations/` | The database schema, access rules and photo bucket, in order |
+| `supabase/functions/` | The three edge functions: `camera-upload`, `camera-test-notify`, `push-key` |
+| `supabase/README.md` | Setup guide for the server side |
 
 ## Using it
 
@@ -105,17 +108,23 @@ Tips for the garage phone: keep it plugged in, set the screen timeout to "never"
 - **Notifications:** On Samsung phones web notifications appear in the notification shade and do not pop up over an open app. On an iPhone, add the viewer to the Home Screen first. An optional ntfy topic can be added in the camera settings, but ntfy's free tier has a daily message limit.
 - **Live video** uses a free public STUN server and no relay, so on some networks it falls back to pictures.
 - **Storage:** the free Supabase tier holds 1 GB. Photos are about 100 KB each, and a delete-all button is in the viewer.
+- **Free projects pause after about a week of inactivity.** A running camera keeps the project awake with its heartbeat.
 - This is a hobby project, not a certified security product.
 
 ## Run your own
 
-You need a free Supabase project and a GitHub account.
+You need a free [Supabase](https://supabase.com) project, the Supabase CLI and a GitHub account.
+The whole server side is in [`supabase/`](supabase/): the database migrations, the three edge functions and a step-by-step guide.
 
-1. Create a Supabase project and set its URL and public (publishable) key in `demo/config.js`.
-2. Create the database tables, row-level security rules, the private `garage-photos` bucket and the three edge functions (`camera-upload`, `camera-test-notify`, `push-key`).
-3. Turn on GitHub Pages for this repository and open `/demo/`.
+In short:
 
-> The SQL and edge function sources currently live only in the Supabase project and are not in this repository yet. Adding them as a `supabase/` folder with a proper setup guide is on the to-do list.
+1. Create a Supabase project, then `supabase link` and `supabase db push` to create the database and the private photo bucket.
+2. `supabase functions deploy camera-upload camera-test-notify push-key`.
+3. Run `supabase/bootstrap-first-invite.sql` once to get your first invite code.
+4. Put your project URL and publishable key in `demo/config.js`, and your GitHub Pages address in the functions.
+5. Turn on GitHub Pages for the repository, open `/demo/viewer.html` and create your account with the invite code.
+
+The full guide, with the commands and the things to watch for, is in [`supabase/README.md`](supabase/README.md).
 
 ## Ideas for later
 

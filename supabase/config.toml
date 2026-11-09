@@ -1,0 +1,12 @@
+# Minimal Supabase CLI config. The camera and the test button do not send a Supabase login token,
+# so these functions check access themselves (a hashed camera code, or the caller's own login via row-level security).
+project_id = "garage-camera"
+
+[functions.camera-upload]
+verify_jwt = false
+
+[functions.camera-test-notify]
+verify_jwt = false
+
+[functions.push-key]
+verify_jwt = false
